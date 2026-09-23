@@ -5,6 +5,7 @@ import {
   validateSignupForm,
   validateOrganizationSignupForm,
 } from "../../lib/validation";
+import { apiRequest } from "../../api";
 
 const ROLE_OPTIONS = [
   {
@@ -52,11 +53,14 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+    const [serverError, setServerError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const update = (field) => (e) => {
+   const update = (field) => (e) => {
     const value = e.target.value;
     setData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
+    setServerError("");
   };
 
   // Organization contact number: digits only, no letters/symbols/minus signs,
@@ -67,20 +71,41 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     setErrors((prev) => ({ ...prev, orgContact: undefined }));
   };
 
-  function handleSubmit(e) {
+    async function handleSubmit(e) {
     e.preventDefault();
+    if (loading) return;
+
     const validationErrors = isOrganization
       ? validateOrganizationSignupForm(data)
       : validateSignupForm(data);
     setErrors(validationErrors);
-    if (Object.keys(validationErrors).length === 0) {
-      // TODO: replace with a real API call once the backend exists
-      console.log("Signup submitted:", { accountType: selectedRole, ...data });
-      if (isOrganization) {
-        onSwitchMode("submitted-organization", data.orgName);
-      } else {
-        onSwitchMode("account-success", selectedRole);
-      }
+    setServerError("");
+    if (Object.keys(validationErrors).length > 0) return;
+
+    // No backend route for organizations yet, so this stays a design-only flow.
+    if (isOrganization) {
+      console.log("Organization signup (design only):", data.orgName);
+      onSwitchMode("submitted-organization", data.orgName);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await apiRequest("/api/auth/register", {
+        method: "POST",
+        body: {
+          firstName: data.firstName.trim(),
+          lastName: data.lastName.trim(),
+          email: data.email.trim(),
+          password: data.password,
+        },
+      });
+      onSwitchMode("account-success", selectedRole);
+    } catch (err) {
+      const detail = Array.isArray(err.details) && err.details[0]?.message;
+      setServerError(detail || err.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -310,15 +335,20 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
           </>
         )}
 
+           {serverError && (
+          <p className="text-sm text-red-300 text-center">{serverError}</p>
+        )}
+
         {statusMessage && (
           <p className="text-sm text-[#8fe28f] text-center">{statusMessage}</p>
         )}
 
         <button
           type="submit"
-          className="w-full py-3.5 rounded-lg bg-[#5bc252] text-white font-bold text-base hover:bg-[#4caa46] active:bg-[#409139] transition-colors"
+          disabled={loading}
+          className="w-full py-3.5 rounded-lg bg-[#5bc252] text-white font-bold text-base hover:bg-[#4caa46] active:bg-[#409139] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Submit
+          {loading ? "Creating account…" : "Submit"}
         </button>
       </form>
 

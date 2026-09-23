@@ -48,18 +48,10 @@ export default function FarmFund({ onLoginSuccess }) {
     setView("locked");
   }
 
-  // Called by LoginForm on every "failed" submit (mocked, since there's no
-  // backend yet to actually check credentials). After MAX_LOGIN_ATTEMPTS,
-  // escalate straight into the locked view.
-  function handleFailedAttempt() {
-    setFailedAttempts((prev) => {
-      const next = prev + 1;
-      if (next >= MAX_LOGIN_ATTEMPTS) {
-        startLockout(1);
-        return 0;
-      }
-      return next;
-    });
+    // Called by LoginForm when the server reports the account is locked.
+  // The backend locks for 15 minutes, which matches lockout tier 1.
+  function handleFailedAttempt(info) {
+    if (info?.locked) startLockout(1);
   }
 
   // Dev-only control: simulate another failed attempt while already locked,

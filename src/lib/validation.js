@@ -16,6 +16,8 @@ export function validateRequired(value, label) {
 export function validatePassword(password, minLength = 8) {
   if (!password) return "Password is required.";
   if (password.length < minLength) return `Use at least ${minLength} characters.`;
+  if (!/[A-Za-z]/.test(password)) return "Include at least one letter.";
+  if (!/[0-9]/.test(password)) return "Include at least one number.";
   return null;
 }
 

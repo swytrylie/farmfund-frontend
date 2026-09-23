@@ -331,17 +331,17 @@ function RecentTransactionsTable() {
   );
 }
 
-function DashboardHome() {
+function DashboardHome({ user }) {
   return (
     <>
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
 
       {/* Welcome banner */}
       <div className="mt-3">
-        <h2 className="text-3xl font-bold text-gray-900">Hello, Nelmar!</h2>
-        <p className="mt-1 text-gray-500">
-          Lauron Family Farm · August 2026 overview
-        </p>
+               <h2 className="text-3xl font-bold text-gray-900">
+          Hello, {user?.firstName}!
+        </h2>
+        <p className="mt-1 text-gray-500">August 2026 overview</p>
       </div>
 
       {/* KPI cards */}
@@ -379,8 +379,11 @@ function ComingSoonPlaceholder({ sectionName }) {
   );
 }
 
-export default function Dashboard({ onSignOut }) {
+export default function Dashboard({ user, onSignOut }) {
   const [activeItem, setActiveItem] = useState("Dashboard");
+
+  const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
+  const initials = `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase();
 
   // Single source of truth mapping each sidebar label to its page component.
   // Every section renders through the exact same wrapper below, so their top
@@ -427,11 +430,11 @@ export default function Dashboard({ onSignOut }) {
         {/* User profile badge */}
         <div className="mt-6 bg-[#4d6b41] rounded-xl p-3 flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
-            NL
+          {initials}
           </div>
           <div className="min-w-0">
             <p className="text-white font-bold text-sm truncate">
-              Nelmar Lauron
+              {fullName}
             </p>
             <p className="text-white/60 text-xs truncate">Farm Owner</p>
           </div>
@@ -462,7 +465,7 @@ export default function Dashboard({ onSignOut }) {
             There is only one place controlling which component shows, so
             top alignment can't drift out of sync between sections again. */}
         {ActiveSectionComponent ? (
-          <ActiveSectionComponent />
+          <ActiveSectionComponent user={user} />
         ) : (
           <ComingSoonPlaceholder sectionName={activeItem} />
         )}

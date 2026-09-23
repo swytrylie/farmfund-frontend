@@ -2,56 +2,58 @@ import { useState } from "react";
 import { Mail, Lock } from "lucide-react";
 import FormInput from "./FormInput";
 import { validateLoginForm } from "../../lib/validation";
-import { MAX_LOGIN_ATTEMPTS } from "../../lib/lockout";
-import { TEST_LOGIN_EMAIL, TEST_LOGIN_PASSWORD } from "../../lib/auth";
+import { apiRequest } from "../../api";
 
-// onFailedAttempt is called for any submit that doesn't match the fixed test
-// credentials, since there's no real backend yet — this simulates "wrong
-// password" so the lockout flow can still be tested end to end.
-// onLoginSuccess is called when the test credentials are entered exactly.
 export default function LoginForm({
   onSwitchMode,
-  attemptsRemaining = MAX_LOGIN_ATTEMPTS,
   onFailedAttempt,
   onLoginSuccess,
 }) {
   const [data, setData] = useState({ email: "", password: "", remember: false });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const update = (field) => (e) => {
     const value = field === "remember" ? e.target.checked : e.target.value;
     setData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
+    setServerError("");
   };
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    if (loading) return;
+
     const validationErrors = validateLoginForm(data);
     setErrors(validationErrors);
-    if (Object.keys(validationErrors).length === 0) {
-      // TODO: replace with a real API call once the backend exists.
-      console.log("Login submitted:", data);
-      const isTestCredentials =
-        data.email.trim().toLowerCase() === TEST_LOGIN_EMAIL &&
-        data.password === TEST_LOGIN_PASSWORD;
+    setServerError("");
+    if (Object.keys(validationErrors).length > 0) return;
 
-      if (isTestCredentials) {
-        onLoginSuccess?.();
+    setLoading(true);
+    try {
+      const result = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: { email: data.email.trim(), password: data.password },
+      });
+      // result is { accessToken, user }
+      onLoginSuccess?.(result);
+    } catch (err) {
+      if (err.status === 403) {
+        // Server says the account is locked: open the locked screen
+        onFailedAttempt?.({ locked: true });
       } else {
-        onFailedAttempt?.();
+        setServerError(err.message);
       }
+    } finally {
+      setLoading(false);
     }
   }
-
-  const hasFailedBefore = attemptsRemaining < MAX_LOGIN_ATTEMPTS;
 
   return (
     <>
       <h2 className="text-3xl font-bold text-white text-center">Hi, Welcome!</h2>
-      <p className="mt-1 text-center text-xs text-white/40">
-        (Dev) Try {TEST_LOGIN_EMAIL} / {TEST_LOGIN_PASSWORD}
-      </p>
 
       <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
         <FormInput
@@ -93,18 +95,16 @@ export default function LoginForm({
           </button>
         </div>
 
-        {hasFailedBefore && (
-          <p className="text-sm text-red-300 text-center">
-            Incorrect email or password. {attemptsRemaining} attempt
-            {attemptsRemaining === 1 ? "" : "s"} remaining.
-          </p>
+        {serverError && (
+          <p className="text-sm text-red-300 text-center">{serverError}</p>
         )}
 
         <button
           type="submit"
-          className="w-full py-4 rounded-lg bg-[#42BD41] text-white font-bold text-lg hover:bg-[#379637] active:bg-[#2f7f2f] transition-colors"
+          disabled={loading}
+          className="w-full py-4 rounded-lg bg-[#42BD41] text-white font-bold text-lg hover:bg-[#379637] active:bg-[#2f7f2f] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Log In
+          {loading ? "Logging in…" : "Log In"}
         </button>
       </form>
 
