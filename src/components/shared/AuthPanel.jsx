@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import LoginForm from "./auth/LoginForm";
-import RoleSelectForm from "./auth/RoleSelectForm";
-import SignupForm from "./auth/SignupForm";
-import ForgotPasswordForm from "./auth/ForgotPasswordForm";
-import OTPForm from "./auth/OTPForm";
-import NewPasswordForm from "./auth/NewPasswordForm";
-import LockedForm from "./auth/LockedForm";
-import AccountSuccessForm from "./auth/AccountSuccessForm";
-import OrganizationSubmittedForm from "./auth/OrganizationSubmittedForm";
+import LoginForm from "../auth/LoginForm";
+import RoleSelectForm from "../auth/RoleSelectForm";
+import SignupForm from "../auth/SignupForm";
+import ForgotPasswordForm from "../auth/ForgotPasswordForm";
+import OTPForm from "../auth/OTPForm";
+import NewPasswordForm from "../auth/NewPasswordForm";
+import LockedForm from "../auth/LockedForm";
+import AccountSuccessForm from "../auth/AccountSuccessForm";
+import OrganizationSubmittedForm from "../auth/OrganizationSubmittedForm";
 
 export default function AuthPanel({
   mode,

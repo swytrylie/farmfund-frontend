@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { TrendingUp, CreditCard, Lightbulb } from "lucide-react";
 import AuthPanel from "./AuthPanel";
 import DevNavBar from "./DevNavBar";
+
 import {
-  LOCKOUT_TIER_SECONDS,
+ LOCKOUT_TIER_SECONDS,
   MAX_LOGIN_ATTEMPTS,
   nextLockoutTier,
-} from "../lib/lockout";
+} from "../../lib/lockout";
 
 const features = [
   { icon: TrendingUp, label: "Real-time income & expense tracking" },
@@ -30,6 +31,18 @@ export default function FarmFund({ onLoginSuccess }) {
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
   function handleSwitchMode(nextMode, payload) {
+    // Organization signup now logs straight into the Org Dashboard instead
+    // of routing to the pending-approval screen — this reuses the SAME
+    // onLoginSuccess prop App.jsx already gives real logins, just with a
+    // mocked session object (no real org backend endpoint exists yet).
+    // We return early instead of calling setView, since we're leaving
+    // FarmFund/AuthPanel entirely rather than switching to another of its
+    // internal views.
+    if (nextMode === "org-signup-success" && payload) {
+      onLoginSuccess({ accessToken: null, user: payload });
+      return;
+    }
+
     setView(nextMode);
     if (nextMode === "otp" && payload) setOtpEmail(payload);
     if (nextMode === "account-success" && payload) setAccountType(payload);

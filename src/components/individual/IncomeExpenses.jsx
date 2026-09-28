@@ -312,7 +312,7 @@ export default function IncomeExpenses() {
         </div>
         <button
           onClick={() => setIsAddingTransaction((open) => !open)}
-          className="bg-[#3f6238] hover:bg-[#34512e] text-white px-5 py-2 rounded-lg flex items-center gap-1.5 font-medium shadow-sm transition-colors"
+          className="mt-12 bg-[#3f6238] hover:bg-[#34512e] text-white px-5 py-2 rounded-lg flex items-center gap-1.5 font-medium shadow-sm transition-colors"
         >
           <Plus size={16} /> Add
         </button>

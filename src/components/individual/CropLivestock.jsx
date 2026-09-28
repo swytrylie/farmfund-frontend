@@ -1,19 +1,27 @@
 import { useState } from "react";
 
-// ---- Comparison bar chart data ----
-// Groups 1–3 match the Corn/Tomatoes/Beans cards below exactly; group 4
+// ---- Comparison bar chart data, per category ----
+// Crop groups 1–3 match the Corn/Tomatoes/Beans cards below exactly; group 4
 // (₱68k / ₱46k / ₱22k) has no matching named item in the spec, so it's
 // labeled "Other" rather than guessing a crop name for it.
-const CHART_GROUPS = [
-  { label: "Corn", revenue: 98000, costs: 61000, profit: 37000 },
-  { label: "Tomatoes", revenue: 72000, costs: 38000, profit: 34000 },
-  { label: "Beans", revenue: 45000, costs: 26000, profit: 19000 },
-  { label: "Other", revenue: 68000, costs: 46000, profit: 22000 },
-];
+// Livestock groups match the sample livestock cards below.
+const CHART_GROUPS = {
+  crops: [
+    { label: "Corn", revenue: 98000, costs: 61000, profit: 37000 },
+    { label: "Tomatoes", revenue: 72000, costs: 38000, profit: 34000 },
+    { label: "Beans", revenue: 45000, costs: 26000, profit: 19000 },
+    { label: "Other", revenue: 68000, costs: 46000, profit: 22000 },
+  ],
+  livestock: [
+    { label: "Broilers", revenue: 84000, costs: 52000, profit: 32000 },
+    { label: "Hogs", revenue: 96000, costs: 71000, profit: 25000 },
+    { label: "Goats", revenue: 38000, costs: 22000, profit: 16000 },
+  ],
+};
 const CHART_MAX = 100000;
 const Y_AXIS_LABELS = ["₱100k", "₱75k", "₱50k", "₱25k", "₱0"];
 
-// ---- Item breakdown cards (Crops only — no Livestock data was specified) ----
+// ---- Item breakdown cards ----
 const CROP_ITEMS = [
   {
     name: "Corn",
@@ -22,7 +30,7 @@ const CROP_ITEMS = [
     revenue: "₱98,000",
     costs: "₱61,000",
     margin: "38%",
-    profitPerAcre: "₱10,571 profit/acre",
+    profitNote: "₱10,571 profit/acre",
   },
   {
     name: "Tomatoes",
@@ -31,7 +39,7 @@ const CROP_ITEMS = [
     revenue: "₱72,000",
     costs: "₱38,000",
     margin: "47%",
-    profitPerAcre: "₱22,667 profit/acre",
+    profitNote: "₱22,667 profit/acre",
   },
   {
     name: "Beans",
@@ -40,11 +48,44 @@ const CROP_ITEMS = [
     revenue: "₱45,000",
     costs: "₱26,000",
     margin: "42%",
-    profitPerAcre: "₱9,500 profit/acre",
+    profitNote: "₱9,500 profit/acre",
   },
 ];
 
-function ComparisonChart() {
+// SAMPLE figures — livestock data was never specified, so these are
+// placeholder numbers (revenue − costs = net profit, margin = profit ÷
+// revenue, all internally consistent). Replace with real data when ready.
+const LIVESTOCK_ITEMS = [
+  {
+    name: "Broiler Chickens",
+    season: "Batch 3, 2026 · 500 heads",
+    netProfit: "+ ₱32,000",
+    revenue: "₱84,000",
+    costs: "₱52,000",
+    margin: "38%",
+    profitNote: "₱64 profit/head",
+  },
+  {
+    name: "Hogs",
+    season: "Fattening cycle 2026 · 12 heads",
+    netProfit: "+ ₱25,000",
+    revenue: "₱96,000",
+    costs: "₱71,000",
+    margin: "26%",
+    profitNote: "₱2,083 profit/head",
+  },
+  {
+    name: "Goats",
+    season: "Breeding stock 2026 · 10 heads",
+    netProfit: "+ ₱16,000",
+    revenue: "₱38,000",
+    costs: "₱22,000",
+    margin: "42%",
+    profitNote: "₱1,600 profit/head",
+  },
+];
+
+function ComparisonChart({ groups }) {
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm mb-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -72,7 +113,7 @@ function ComparisonChart() {
         </div>
 
         <div className="flex-1 flex items-end h-48 border-l border-gray-200 pl-6">
-          {CHART_GROUPS.map((g) => (
+          {groups.map((g) => (
             <div key={g.label} className="flex flex-col items-center flex-1 px-1.5">
               <div className="w-full flex items-end justify-center gap-1 h-40">
                 <div
@@ -129,13 +170,14 @@ function ItemCard({ item }) {
         </div>
       </div>
 
-      <p className="mt-4 text-xs text-gray-500">{item.profitPerAcre}</p>
+      <p className="mt-4 text-xs text-gray-500">{item.profitNote}</p>
     </div>
   );
 }
 
 export default function CropLivestock() {
   const [category, setCategory] = useState("crops");
+  const items = category === "crops" ? CROP_ITEMS : LIVESTOCK_ITEMS;
 
   return (
     <div>
@@ -147,9 +189,9 @@ export default function CropLivestock() {
         Track costs, revenue, and profit per operation
       </p>
 
-      {/* Comparison bar chart */}
+      {/* Comparison bar chart — follows the selected category */}
       <div className="mt-6">
-        <ComparisonChart />
+        <ComparisonChart groups={CHART_GROUPS[category]} />
       </div>
 
       {/* Category filter pills */}
@@ -177,19 +219,11 @@ export default function CropLivestock() {
       </div>
 
       {/* Item breakdown cards */}
-      {category === "crops" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {CROP_ITEMS.map((item) => (
-            <ItemCard key={item.name} item={item} />
-          ))}
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-100 rounded-2xl p-10 shadow-sm text-center">
-          <p className="text-gray-400 text-sm">
-            Livestock profitability data isn't available yet — coming soon.
-          </p>
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {items.map((item) => (
+          <ItemCard key={item.name} item={item} />
+        ))}
+      </div>
     </div>
   );
 }

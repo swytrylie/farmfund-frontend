@@ -1,4 +1,4 @@
-import { useState } from "react";
+import {useState, useEffect } from "react";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -16,13 +16,22 @@ import {
   LogOut,
   Clock,
 } from "lucide-react";
-import NotificationBell from "./NotificationBell";
-import AIAdvisorWidget from "./AIAdvisorWidget";
+import NotificationBell from "../shared/NotificationBell";
+import AIAdvisorWidget from "../shared/AIAdvisorWidget";
 import TrendsComparisons from "./TrendsComparisons";
 import IncomeExpenses from "./IncomeExpenses";
 import BudgetManagement from "./BudgetManagement";
 import CropLivestock from "./CropLivestock";
 import LoansDebt from "./LoansDebt";
+import FinancialReports from "./FinancialReports";
+import Forecasting from "./Forecasting"; 
+import AIAdvisor from "./AIAdvisor";
+import AISummary from "./AISummary";
+import DigitalReceipts from "./DigitalReceipts";
+import Alerts from "./Alerts";
+import FarmProfile from "./FarmProfile";
+import { getDashboardOverview } from "../../mocks/individual/dashboard.mock";
+import { getAlerts } from "../../mocks/individual/alerts.mock";
 
 // ---- Sidebar nav data ----
 const NAV_GROUPS = [
@@ -64,105 +73,15 @@ const NAV_GROUPS = [
   },
 ];
 
-// ---- KPI cards data ----
-const KPI_CARDS = [
-  {
-    label: "TOTAL INCOME",
-    value: "₱58,200",
-    change: "+8.3% vs last month",
-    changeColor: "text-green-600",
-  },
-  {
-    label: "TOTAL EXPENSES",
-    value: "₱12,590",
-    change: "-2.1% vs last month",
-    changeColor: "text-red-500",
-  },
-  {
-    label: "NET BALANCE",
-    value: "₱45,610",
-    change: "+18.4% vs last month",
-    changeColor: "text-green-600",
-  },
-  {
-    label: "ACTIVE LOANS",
-    value: "₱151,500",
-    change: "2 active loans",
-    changeColor: "text-amber-600",
-  },
-];
-
-// ---- Monthly chart mock data (Mar–Aug 2026), scaled against an ₱80k ceiling ----
-const MONTHLY_DATA = [
-  { month: "Mar", income: 38000, expenses: 15000 },
-  { month: "Apr", income: 42000, expenses: 18000 },
-  { month: "May", income: 51000, expenses: 20500 },
-  { month: "Jun", income: 47000, expenses: 16800 },
-  { month: "Jul", income: 55000, expenses: 19200 },
-  { month: "Aug", income: 58200, expenses: 12590 },
-];
 const CHART_MAX = 80000;
 const Y_AXIS_LABELS = ["₱80k", "₱60k", "₱40k", "₱20k", "₱0k"];
 
-// ---- Active loans data ----
-const ACTIVE_LOANS = [
-  {
-    name: "LANDBANK Agriculture",
-    subtitle: "Farm Equipment",
-    progress: 42,
-    remaining: "₱87,500 remaining",
-    due: "Due Sep 5, 2026",
-  },
-  {
-    name: "Agrarian Reform Fund",
-    subtitle: "Crop Production Capital",
-    progress: 20,
-    remaining: "₱64,000 remaining",
-    due: "Due Sep 15, 2026",
-  },
-];
-
-// ---- Recent transactions mock data (first row matches spec exactly) ----
-const TRANSACTIONS = [
-  {
-    date: "Aug 20, 2026",
-    description: "Corn Harvest",
-    category: "Crop Sales",
-    method: "GCash",
-    amount: "+₱45,000.00",
-    positive: true,
-  },
-  {
-    date: "Aug 18, 2026",
-    description: "Fertilizer Purchase",
-    category: "Farm Supplies",
-    method: "Cash",
-    amount: "-₱6,200.00",
-    positive: false,
-  },
-  {
-    date: "Aug 15, 2026",
-    description: "Loan Repayment",
-    category: "Loan Payment",
-    method: "Bank Transfer",
-    amount: "-₱8,500.00",
-    positive: false,
-  },
-  {
-    date: "Aug 10, 2026",
-    description: "Rice Harvest",
-    category: "Crop Sales",
-    method: "GCash",
-    amount: "+₱21,000.00",
-    positive: true,
-  },
-];
 
 function SidebarNavItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm transition-colors ${
         active
           ? "bg-[#4d6b41] text-white font-semibold"
           : "text-white/70 hover:bg-white/5 hover:text-white"
@@ -186,7 +105,7 @@ function KPICard({ label, value, change, changeColor }) {
   );
 }
 
-function MonthlyOverviewChart() {
+function MonthlyOverviewChart({ data }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between">
@@ -204,7 +123,7 @@ function MonthlyOverviewChart() {
 
         {/* Bars */}
         <div className="flex-1 flex items-end justify-between gap-3 h-52 border-l border-gray-100 pl-4">
-          {MONTHLY_DATA.map(({ month, income, expenses }) => (
+          {data.map(({ month, income, expenses }) => (
             <div key={month} className="flex flex-col items-center flex-1">
               <div className="flex items-end gap-1 h-44">
                 <div
@@ -237,18 +156,21 @@ function MonthlyOverviewChart() {
   );
 }
 
-function ActiveLoansPanel() {
+function ActiveLoansPanel({ loans, onManage }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-gray-900">Active Loans</h3>
-        <button className="text-sm font-semibold text-green-600 hover:underline">
+        <button
+          onClick={onManage}
+          className="text-sm font-semibold text-green-600 hover:underline"
+        >
           Manage &gt;
         </button>
       </div>
 
       <div className="mt-4 space-y-4">
-        {ACTIVE_LOANS.map((loan) => (
+        {loans.map((loan) => (
           <div
             key={loan.name}
             className="border border-gray-100 rounded-lg p-4"
@@ -286,7 +208,7 @@ function ActiveLoansPanel() {
   );
 }
 
-function RecentTransactionsTable() {
+function RecentTransactionsTable({ transactions }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <h3 className="font-bold text-gray-900">Recent Transactions</h3>
@@ -303,7 +225,7 @@ function RecentTransactionsTable() {
             </tr>
           </thead>
           <tbody>
-            {TRANSACTIONS.map((t, i) => (
+            {transactions.map((t, i) => (
               <tr key={i} className="border-t border-gray-50">
                 <td className="py-3 text-gray-500">{t.date}</td>
                 <td className="py-3 text-gray-900 font-medium">
@@ -331,14 +253,38 @@ function RecentTransactionsTable() {
   );
 }
 
-function DashboardHome({ user }) {
+function DashboardHome({ user, onNavigate }) {
+  const [overview, setOverview] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardOverview().then((data) => {
+      if (!cancelled) {
+        setOverview(data);
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="mt-6 text-center text-gray-400 text-sm py-10">
+        Loading dashboard…
+      </div>
+    );
+  }
+
   return (
     <>
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
 
       {/* Welcome banner */}
       <div className="mt-3">
-               <h2 className="text-3xl font-bold text-gray-900">
+        <h2 className="text-3xl font-bold text-gray-900">
           Hello, {user?.firstName}!
         </h2>
         <p className="mt-1 text-gray-500">August 2026 overview</p>
@@ -346,20 +292,23 @@ function DashboardHome({ user }) {
 
       {/* KPI cards */}
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {KPI_CARDS.map((card) => (
+        {overview.kpis.map((card) => (
           <KPICard key={card.label} {...card} />
         ))}
       </div>
 
       {/* Charts + Active Loans */}
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <MonthlyOverviewChart />
-        <ActiveLoansPanel />
+        <MonthlyOverviewChart data={overview.monthlyOverview} />
+        <ActiveLoansPanel
+          loans={overview.activeLoans}
+          onManage={() => onNavigate?.("Loans & Debt")}
+        />
       </div>
 
       {/* Recent Transactions */}
       <div className="mt-6">
-        <RecentTransactionsTable />
+        <RecentTransactionsTable transactions={overview.recentTransactions} />
       </div>
     </>
   );
@@ -382,6 +331,29 @@ function ComingSoonPlaceholder({ sectionName }) {
 export default function Dashboard({ user, onSignOut }) {
   const [activeItem, setActiveItem] = useState("Dashboard");
 
+  // Alerts now live here, once, shared by BOTH the bell popup and the full
+  // Alerts page — dismissing/marking-read in either place updates this one
+  // state, so both are always showing the exact same thing.
+  const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAlerts().then((data) => {
+      if (!cancelled) setAlerts(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function handleDismissAlert(id) {
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  function handleMarkAllAlertsRead() {
+    setAlerts((prev) => prev.map((a) => ({ ...a, unread: false })));
+  }
+
   const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
   const initials = `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase();
 
@@ -395,24 +367,37 @@ export default function Dashboard({ user, onSignOut }) {
     "Budget Management": BudgetManagement,
     "Crop / Livestock": CropLivestock,
     "Loans & Debt": LoansDebt,
+   "Financial Reports": FinancialReports,
+   "Forecasting": Forecasting,
+   "AI Advisor": AIAdvisor,
+   "AI Summary": AISummary,
+   "Digital Receipts": DigitalReceipts,
+   "Alerts": Alerts,
+   "Farm Profile": FarmProfile,
   };
   const ActiveSectionComponent = SECTION_COMPONENTS[activeItem];
 
+  // The AI Advisor page is a fixed-height chat screen: the whole layout is
+  // locked to the viewport so the sidebar can't scroll away, and only the
+  // chat's own message area scrolls. Every other page keeps its normal
+  // scrolling behavior.
+  const isAdvisorPage = activeItem === "AI Advisor";
+
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex h-screen max-h-screen overflow-hidden bg-gray-50">
       {/* Sidebar */}
-      <aside className="w-64 shrink-0 bg-[#31422c] flex flex-col px-4 py-6">
-        <div className="px-2 mb-8">
+      <aside className="w-64 min-w-[16rem] max-w-[16rem] h-screen shrink-0 bg-[#31422c] flex flex-col overflow-hidden px-4 py-4">
+        <div className="px-2 mb-4">
           <p className="text-white font-bold text-lg">FarmFund</p>
         </div>
 
-        <nav className="flex-1 space-y-6 overflow-y-auto">
+        <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
-              <p className="px-3 mb-2 text-[10px] font-bold text-white/40 uppercase tracking-wider">
+              <p className="px-3 mb-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">
                 {group.label}
               </p>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {group.items.map((item) => (
                   <SidebarNavItem
                     key={item.label}
@@ -428,7 +413,7 @@ export default function Dashboard({ user, onSignOut }) {
         </nav>
 
         {/* User profile badge */}
-        <div className="mt-6 bg-[#4d6b41] rounded-xl p-3 flex items-center gap-3">
+        <div className="mt-3 bg-[#4d6b41] rounded-xl p-2 flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
           {initials}
           </div>
@@ -442,39 +427,68 @@ export default function Dashboard({ user, onSignOut }) {
 
         <button
           onClick={onSignOut}
-          className="mt-3 flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:text-white transition-colors"
+          className="mt-2 flex items-center gap-2 px-3 py-1.5 text-sm text-white/70 hover:text-white transition-colors"
         >
           <LogOut size={16} />
           Sign out
         </button>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 px-8 pt-6 pb-8 overflow-y-auto relative max-w-7xl mx-auto w-full">
+      {/* Main content. On the AI Advisor page this is locked to the screen
+          height as a non-scrolling flex column, so the chat page can scroll
+          its own messages; every other page scrolls normally as before. */}
+      <div
+        className={`flex-1 min-w-0 h-screen ${
+          isAdvisorPage ? "overflow-hidden" : "overflow-y-auto"
+        }`}
+      >
+      <main
+        className={`relative max-w-7xl mx-auto w-full px-8 pt-6 pb-8 ${
+          isAdvisorPage ? "h-screen flex flex-col overflow-hidden" : "min-h-full"
+        }`}
+      >
         {/* Notification bell — floats independently via absolute positioning,
-            taken out of the normal document flow entirely. This is what lets
-            every section's title be the literal first element in the content
-            area (matching how "FarmFund" is the first element in the sidebar)
-            instead of being pushed down by a row the bell used to occupy. */}
-        <div className="absolute top-0 right-0 z-10">
-          <NotificationBell onViewAllAlerts={() => setActiveItem("Alerts")} />
+            taken out of the normal document flow entirely. Now reads/writes
+            the same shared alerts state as the full Alerts page below.
+            Position matches the Org Dashboard's bell exactly (top-6 right-8)
+            instead of the old top-0 right-0, per request. */}
+        <div className="absolute top-6 right-8 z-10">
+          <NotificationBell
+            alerts={alerts}
+            onDismissAlert={handleDismissAlert}
+            onMarkAllAlertsRead={handleMarkAllAlertsRead}
+            onViewAllAlerts={() => setActiveItem("Alerts")}
+          />
         </div>
 
         {/* Section content — every section, including Dashboard's own home
             page, now renders its own title as the true first element here.
             There is only one place controlling which component shows, so
-            top alignment can't drift out of sync between sections again. */}
+            top alignment can't drift out of sync between sections again.
+            Every section receives the shared alerts props too — only
+            Alerts.jsx actually uses them, everything else just ignores
+            the extra props, same as how `user` is already passed to all.
+            onNavigate is the same idea: only DashboardHome currently uses
+            it (for the Manage button), everything else ignores it. */}
         {ActiveSectionComponent ? (
-          <ActiveSectionComponent user={user} />
+          <ActiveSectionComponent
+            user={user}
+            alerts={alerts}
+            onDismissAlert={handleDismissAlert}
+            onMarkAllAlertsRead={handleMarkAllAlertsRead}
+            onNavigate={setActiveItem}
+          />
         ) : (
           <ComingSoonPlaceholder sectionName={activeItem} />
         )}
 
         {/* Floating AI Advisor widget (button + chat panel) — fixed to the
             viewport, so it stays in the same on-screen spot while scrolling
-            regardless of which section is active. */}
-        <AIAdvisorWidget />
+            regardless of which section is active. Hidden on the full-page AI
+            Advisor view so it can't overlap that page's send button. */}
+        {!isAdvisorPage && <AIAdvisorWidget />}
       </main>
+      </div>
     </div>
   );
 }

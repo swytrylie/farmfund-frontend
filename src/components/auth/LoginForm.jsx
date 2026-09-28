@@ -59,6 +59,7 @@ export default function LoginForm({
         <FormInput
           icon={Mail}
           type="email"
+          autoComplete="username"
           placeholder="Email"
           value={data.email}
           onChange={update("email")}
@@ -67,6 +68,8 @@ export default function LoginForm({
 
         <FormInput
           icon={Lock}
+          autoComplete="current-password"
+          capsLockWarning
           placeholder="Password"
           value={data.password}
           onChange={update("password")}

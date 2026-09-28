@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Lock, CheckCircle } from "lucide-react";
 import FormInput from "./FormInput";
+import PasswordStrengthField from "./PasswordStrengthField";
 import { validatePassword, validateConfirmPassword } from "../../lib/validation";
 
 export default function NewPasswordForm({ onSwitchMode }) {
@@ -22,6 +23,15 @@ export default function NewPasswordForm({ onSwitchMode }) {
     const value = e.target.value;
     setData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  // "Use suggested strong password": fills BOTH fields and reveals them so
+  // the person can see and save the generated password.
+  const handleUseSuggested = (generated) => {
+    setData({ password: generated, confirmPassword: generated });
+    setErrors((prev) => ({ ...prev, password: undefined, confirmPassword: undefined }));
+    setShowPassword(true);
+    setShowConfirmPassword(true);
   };
 
   function handleSubmit(e) {
@@ -61,15 +71,15 @@ export default function NewPasswordForm({ onSwitchMode }) {
       )}
 
       <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
-        <FormInput
+        <PasswordStrengthField
           icon={Lock}
           placeholder="New Password"
           value={data.password}
           onChange={update("password")}
           error={errors.password}
-          showToggle
           visible={showPassword}
           onToggleVisible={() => setShowPassword((p) => !p)}
+          onUseSuggested={handleUseSuggested}
         />
 
         <FormInput

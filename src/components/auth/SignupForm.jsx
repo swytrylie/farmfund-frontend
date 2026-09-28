@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { User, Building2, Info } from "lucide-react";
 import FormInput from "./FormInput";
+import PasswordStrengthField from "./PasswordStrengthField";
 import {
   validateSignupForm,
   validateOrganizationSignupForm,
@@ -71,6 +72,32 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     setErrors((prev) => ({ ...prev, orgContact: undefined }));
   };
 
+  // Date Established: digits only, dashes inserted automatically as you
+  // type (2015062 0 → 2015-06-20) — letters simply can't be typed in at
+  // all, since anything non-numeric is stripped before it ever reaches state.
+  const updateDateEstablished = (e) => {
+    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 8); // YYYYMMDD
+    let formatted = digitsOnly;
+    if (digitsOnly.length > 4) {
+      formatted = `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
+    }
+    if (digitsOnly.length > 6) {
+      formatted = `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4, 6)}-${digitsOnly.slice(6)}`;
+    }
+    setData((prev) => ({ ...prev, dateEstablished: formatted }));
+    setErrors((prev) => ({ ...prev, dateEstablished: undefined }));
+  };
+
+  // "Use suggested strong password": fills Password AND Confirm Password, and
+  // reveals both so the person can actually see and save what was generated.
+  const handleUseSuggested = (generated) => {
+    setData((prev) => ({ ...prev, password: generated, confirmPassword: generated }));
+    setErrors((prev) => ({ ...prev, password: undefined, confirmPassword: undefined }));
+    setServerError("");
+    setShowPassword(true);
+    setShowConfirmPassword(true);
+  };
+
     async function handleSubmit(e) {
     e.preventDefault();
     if (loading) return;
@@ -82,10 +109,20 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     setServerError("");
     if (Object.keys(validationErrors).length > 0) return;
 
-    // No backend route for organizations yet, so this stays a design-only flow.
+    // No backend route for organizations yet, so this stays a design-only,
+    // mocked flow — but it now goes straight to the Org Dashboard instead
+    // of the pending-approval screen, per the updated spec. The payload
+    // carries everything OrgDashboard needs to greet the real person by
+    // name instead of a hardcoded example.
     if (isOrganization) {
-      console.log("Organization signup (design only):", data.orgName);
-      onSwitchMode("submitted-organization", data.orgName);
+      onSwitchMode("org-signup-success", {
+        accountType: "organization",
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        email: data.email.trim(),
+        orgName: data.orgName.trim(),
+        role: "Owner",
+      });
       return;
     }
 
@@ -173,7 +210,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
                 <FormInput
                   placeholder="YYYY-MM-DD"
                   value={data.dateEstablished}
-                  onChange={update("dateEstablished")}
+                  onChange={updateDateEstablished}
                   error={errors.dateEstablished}
                   compact
                 />
@@ -223,7 +260,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
                 <FieldLabel>Email Address</FieldLabel>
                 <FormInput
                   type="email"
-                  placeholder="e.g., owner@kfacoop.ph"
+                  placeholder="e.g., owner@gmail.com"
                   value={data.email}
                   onChange={update("email")}
                   error={errors.email}
@@ -232,14 +269,14 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
               </div>
               <div>
                 <FieldLabel>Create Password</FieldLabel>
-                <FormInput
+                <PasswordStrengthField
                   placeholder="Create a password"
                   value={data.password}
                   onChange={update("password")}
                   error={errors.password}
-                  showToggle
                   visible={showPassword}
                   onToggleVisible={() => setShowPassword((p) => !p)}
+                  onUseSuggested={handleUseSuggested}
                   compact
                 />
               </div>
@@ -296,7 +333,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
                 <FieldLabel>Email Address</FieldLabel>
                 <FormInput
                   type="email"
-                  placeholder="e.g., owner@kfacoop.ph"
+                  placeholder="e.g., owner@gmail.com"
                   value={data.email}
                   onChange={update("email")}
                   error={errors.email}
@@ -308,14 +345,14 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
             {/* Password */}
             <div>
               <FieldLabel>Create Password</FieldLabel>
-              <FormInput
+              <PasswordStrengthField
                 placeholder="Create a password"
                 value={data.password}
                 onChange={update("password")}
                 error={errors.password}
-                showToggle
                 visible={showPassword}
                 onToggleVisible={() => setShowPassword((p) => !p)}
+                onUseSuggested={handleUseSuggested}
               />
             </div>
 
