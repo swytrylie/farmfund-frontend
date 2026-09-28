@@ -106,6 +106,19 @@ function KPICard({ label, value, change, changeColor }) {
 }
 
 function MonthlyOverviewChart({ data }) {
+  // Bars grow from 0 on mount: starts at 0, flips to true one frame later so
+  // the browser registers the 0-height state first, then the CSS transition
+  // animates to the real height. Two rAFs (not one) because a single frame
+  // can land in the same paint as the initial render in some browsers.
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, []);
+
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between">
@@ -123,17 +136,23 @@ function MonthlyOverviewChart({ data }) {
 
         {/* Bars */}
         <div className="flex-1 flex items-end justify-between gap-3 h-52 border-l border-gray-100 pl-4">
-          {data.map(({ month, income, expenses }) => (
+          {data.map(({ month, income, expenses }, i) => (
             <div key={month} className="flex flex-col items-center flex-1">
               <div className="flex items-end gap-1 h-44">
                 <div
-                  className="w-3.5 rounded-t bg-green-500"
-                  style={{ height: `${(income / CHART_MAX) * 100}%` }}
+                  className="w-3.5 rounded-t bg-green-500 transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (income / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 60}ms`,
+                  }}
                   title={`Income: ₱${income.toLocaleString()}`}
                 />
                 <div
-                  className="w-3.5 rounded-t bg-[#d9a736]"
-                  style={{ height: `${(expenses / CHART_MAX) * 100}%` }}
+                  className="w-3.5 rounded-t bg-[#d9a736] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (expenses / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 60 + 60}ms`,
+                  }}
                   title={`Expenses: ₱${expenses.toLocaleString()}`}
                 />
               </div>

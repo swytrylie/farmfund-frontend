@@ -104,6 +104,18 @@ function KPICard({ label, value, subtext, subtextColor, borderColor }) {
 function CollectionsTrendChart({ data }) {
   const [hoveredMonth, setHoveredMonth] = useState(null);
 
+  // Bars grow from 0 on mount, same technique as the other dashboards' bar
+  // charts: start at 0, flip to true one frame later so the browser
+  // registers the 0-height state before the CSS transition animates it.
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, []);
+
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between">
@@ -119,7 +131,7 @@ function CollectionsTrendChart({ data }) {
         </div>
 
         <div className="flex-1 flex items-end justify-between gap-3 h-52 border-l border-gray-100 pl-4 relative">
-          {data.map((d) => {
+          {data.map((d, i) => {
             const isHovered = hoveredMonth === d.month;
             return (
               <div
@@ -139,10 +151,13 @@ function CollectionsTrendChart({ data }) {
                   </div>
                 )}
                 <div
-                  className={`w-6 rounded-t transition-colors ${
+                  className={`w-6 rounded-t transition-all duration-700 ease-out ${
                     isHovered ? "bg-[#c9922a]" : "bg-[#d9a736]"
                   }`}
-                  style={{ height: `${(d.collected / CHART_MAX) * 100}%` }}
+                  style={{
+                    height: `${grown ? (d.collected / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 60}ms`,
+                  }}
                 />
                 <span className="mt-2 text-[11px] text-gray-400">{d.month}</span>
               </div>

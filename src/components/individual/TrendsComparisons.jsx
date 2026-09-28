@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const PRIMARY_TABS = [
   { key: "season", label: "Season-on-Season" },
@@ -362,6 +362,19 @@ export default function TrendsComparisons() {
   const [metricTab, setMetricTab] = useState("income");
   const activeChart = CHART_CONFIG[metricTab];
 
+  // Bars grow from 0 whenever the selected metric (Income/Expenses/Profit)
+  // changes, so switching pills replays the animation on the new bars —
+  // same technique as the tab-switching charts elsewhere in the app.
+  const [barsGrown, setBarsGrown] = useState(false);
+  useEffect(() => {
+    setBarsGrown(false);
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setBarsGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [metricTab]);
+
   return (
     <div>
       {/* Header */}
@@ -436,9 +449,10 @@ export default function TrendsComparisons() {
                   >
                     <div className="w-full flex items-end h-40">
                       <div
-                        className={`w-full rounded-t transition-colors ${activeChart.barColor}`}
+                        className={`w-full rounded-t transition-all duration-700 ease-out ${activeChart.barColor}`}
                         style={{
-                          height: `${(bar.value / CHART_MAX) * 100}%`,
+                          height: `${barsGrown ? (bar.value / CHART_MAX) * 100 : 0}%`,
+                          transitionDelay: `${i * 70}ms`,
                         }}
                         title={`₱${bar.value.toLocaleString()}`}
                       />

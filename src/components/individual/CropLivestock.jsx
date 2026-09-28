@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 // ---- Comparison bar chart data, per category ----
 // Crop groups 1–3 match the Corn/Tomatoes/Beans cards below exactly; group 4
@@ -86,6 +86,20 @@ const LIVESTOCK_ITEMS = [
 ];
 
 function ComparisonChart({ groups }) {
+  // Bars grow from 0 whenever `groups` changes — not just on first mount —
+  // since switching the Crops/Livestock tab re-renders this same component
+  // with new data rather than unmounting it. Re-running the grow-in on
+  // every data change reinforces that the numbers actually switched.
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    setGrown(false);
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [groups]);
+
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm mb-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -113,22 +127,31 @@ function ComparisonChart({ groups }) {
         </div>
 
         <div className="flex-1 flex items-end h-48 border-l border-gray-200 pl-6">
-          {groups.map((g) => (
+          {groups.map((g, i) => (
             <div key={g.label} className="flex flex-col items-center flex-1 px-1.5">
               <div className="w-full flex items-end justify-center gap-1 h-40">
                 <div
-                  className="w-1/3 rounded-t-sm bg-[#4f7331]"
-                  style={{ height: `${(g.revenue / CHART_MAX) * 100}%` }}
+                  className="w-1/3 rounded-t-sm bg-[#4f7331] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (g.revenue / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 80}ms`,
+                  }}
                   title={`Revenue: ₱${g.revenue.toLocaleString()}`}
                 />
                 <div
-                  className="w-1/3 rounded-t-sm bg-[#b83838]"
-                  style={{ height: `${(g.costs / CHART_MAX) * 100}%` }}
+                  className="w-1/3 rounded-t-sm bg-[#b83838] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (g.costs / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 80 + 60}ms`,
+                  }}
                   title={`Costs: ₱${g.costs.toLocaleString()}`}
                 />
                 <div
-                  className="w-1/3 rounded-t-sm bg-[#e5b352]"
-                  style={{ height: `${(g.profit / CHART_MAX) * 100}%` }}
+                  className="w-1/3 rounded-t-sm bg-[#e5b352] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (g.profit / CHART_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 80 + 120}ms`,
+                  }}
                   title={`Profit: ₱${g.profit.toLocaleString()}`}
                 />
               </div>

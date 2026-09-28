@@ -132,7 +132,7 @@ function AccountGrowthChart({ data }) {
             />
             <YAxis hide domain={[0, 100]} />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-            <Bar dataKey="value" fill="#d9a736" radius={[6, 6, 0, 0]} maxBarSize={48} />
+            <Bar dataKey="value" fill="#d9a736" radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive animationDuration={700} animationEasing="ease-out" />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, ArrowUpRight, Coins, Search } from "lucide-react";
 
 // ---- KPI summary data ----
@@ -120,6 +120,18 @@ function KPICard({ label, value, valueColor, iconBg, iconColor, isNet }) {
 }
 
 function WeeklyOverviewChart() {
+  // Bars grow from 0 on mount — WEEKLY_DATA is static, so this only needs to
+  // run once (unlike the tab-switching charts elsewhere that re-trigger on
+  // data change).
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, []);
+
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm mb-6">
       <h3 className="font-bold text-gray-900">Weekly Overview - August 2026</h3>
@@ -132,17 +144,23 @@ function WeeklyOverviewChart() {
         </div>
 
         <div className="flex-1 flex items-end h-48 border-l border-gray-200 pl-6">
-          {WEEKLY_DATA.map((w) => (
+          {WEEKLY_DATA.map((w, i) => (
             <div key={w.week} className="flex flex-col items-center flex-1 px-2">
               <div className="w-full flex items-end justify-center gap-1.5 h-40">
                 <div
-                  className="w-1/2 rounded-t-sm bg-[#4f7331]"
-                  style={{ height: `${(w.income / WEEKLY_MAX) * 100}%` }}
+                  className="w-1/2 rounded-t-sm bg-[#4f7331] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (w.income / WEEKLY_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 70}ms`,
+                  }}
                   title={`Income: ₱${w.income.toLocaleString()}`}
                 />
                 <div
-                  className="w-1/2 rounded-t-sm bg-[#b35959]"
-                  style={{ height: `${(w.expenses / WEEKLY_MAX) * 100}%` }}
+                  className="w-1/2 rounded-t-sm bg-[#b35959] transition-[height] duration-700 ease-out"
+                  style={{
+                    height: `${grown ? (w.expenses / WEEKLY_MAX) * 100 : 0}%`,
+                    transitionDelay: `${i * 70 + 45}ms`,
+                  }}
                   title={`Expenses: ₱${w.expenses.toLocaleString()}`}
                 />
               </div>

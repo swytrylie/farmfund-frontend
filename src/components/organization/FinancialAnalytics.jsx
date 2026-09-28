@@ -116,7 +116,15 @@ export default function FinancialAnalytics() {
               />
               <YAxis hide domain={[0, 100]} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
-              <Bar dataKey="rate" fill="#3f5d27" radius={[8, 8, 0, 0]} maxBarSize={56} />
+              <Bar
+                dataKey="rate"
+                fill="#3f5d27"
+                radius={[8, 8, 0, 0]}
+                maxBarSize={56}
+                isAnimationActive
+                animationDuration={700}
+                animationEasing="ease-out"
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
