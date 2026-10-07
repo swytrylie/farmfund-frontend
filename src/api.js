@@ -20,7 +20,13 @@ export async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const json = await res.json().catch(() => null);
 
   if (!res.ok) {
-    const error = new Error(json?.message || `Request failed (${res.status})`);
+    // If the server explained exactly what was wrong (e.g. "name cannot contain < or >"),
+    // show that instead of the generic "Validation failed".
+    const specific =
+      Array.isArray(json?.details) && typeof json.details[0]?.message === 'string'
+        ? json.details[0].message
+        : null;
+    const error = new Error(specific || json?.message || `Request failed (${res.status})`);
     error.status = res.status;
     error.details = json?.details;
     throw error;

@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { TrendingUp, CreditCard, Lightbulb } from "lucide-react";
 import AuthPanel from "./AuthPanel";
 import DevNavBar from "./DevNavBar";
-
 import {
- LOCKOUT_TIER_SECONDS,
+  LOCKOUT_TIER_SECONDS,
   MAX_LOGIN_ATTEMPTS,
   nextLockoutTier,
 } from "../../lib/lockout";
@@ -31,15 +30,16 @@ export default function FarmFund({ onLoginSuccess }) {
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
   function handleSwitchMode(nextMode, payload) {
-    // Organization signup now logs straight into the Org Dashboard instead
-    // of routing to the pending-approval screen — this reuses the SAME
-    // onLoginSuccess prop App.jsx already gives real logins, just with a
-    // mocked session object (no real org backend endpoint exists yet).
+    // Organization signup logs straight into the Org Dashboard, reusing
+    // the SAME onLoginSuccess prop App.jsx already gives real logins.
+    // payload is now a genuine { accessToken, user } session object from
+    // SignupForm's real register()+login() calls, not a mocked one — passed
+    // straight through rather than wrapped here.
     // We return early instead of calling setView, since we're leaving
     // FarmFund/AuthPanel entirely rather than switching to another of its
     // internal views.
     if (nextMode === "org-signup-success" && payload) {
-      onLoginSuccess({ accessToken: null, user: payload });
+      onLoginSuccess(payload);
       return;
     }
 

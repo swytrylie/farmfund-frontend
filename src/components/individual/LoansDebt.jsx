@@ -1,591 +1,249 @@
-import { useState } from "react";
-import { Clock, CheckCircle2, Info, Plus, UploadCloud, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Clock, CheckCircle2, XCircle, AlertTriangle, Info, Plus } from "lucide-react";
+import { authedRequest } from "../../api";
 
-// ---- KPI summary data ----
-const KPI_CARDS = [
-  { label: "Total Outstanding", value: "₱151,000", valueColor: "text-[#b83838]" },
-  {
-    label: "Next Payment Due",
-    value: "₱14,200",
-    valueColor: "text-[#be8238]",
-    subtext: "In 7 days 2026 -09-05",
-  },
-  { label: "Active Loans", value: "2", valueColor: "text-gray-900" },
-];
+const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
-// ---- New Loan modal dropdown options ----
-const LENDER_OPTIONS = [
-  "Land Bank of the Philippines (LBP)",
-  "Development Bank of the Philippines (DBP)",
-  "Agricultural Credit Policy Council (ACPC)",
-  "Quedan and Rural Credit Guarantee Corporation (Quedancor)",
-  "Rural bank",
-  "Cooperative (e.g., KFA Cooperative)",
-  "Microfinance institution / NGO",
-  "Private lender / individual",
-  "Other",
-];
-const LOAN_TYPE_OPTIONS = [
-  "Crop Production",
-  "Equipment / Machinery",
-  "Land Acquisition",
-  "Working Capital",
-  "Other",
-];
-const LOAN_TERM_OPTIONS = ["12 months", "24 months", "36 months", "60 months"];
-const PAYMENT_FREQUENCY_OPTIONS = [
-  "Monthly",
-  "Quarterly",
-  "Semi-Annually",
-  "Annually",
-  "Lump Sum at Maturity",
-];
-
-// ---- Initial loan data ----
-// Agrarian Reform Fund's 42% / ₱87,500 here is a literal duplicate of
-// LANDBANK's numbers, confirmed against the actual screenshot — but it
-// conflicts with the 20% / ₱64,000 already shown for the same loan on the
-// Dashboard home page. Matching this screenshot exactly, as instructed;
-// the two pages now disagree with each other about this loan's real numbers.
-//
-// Agrarian's detail-panel fields (principal, interest, term, paid-so-far)
-// weren't specified anywhere, so they're filled in as reasonable
-// placeholders consistent with its known ₱87,500 remaining balance here —
-// not real figures.
-const INITIAL_LOANS = {
-  landbank: {
-    id: "landbank",
-    name: "LANDBANK Agriculture",
-    subtitle: "Farm Equipment",
-    status: "active",
-    progress: 42,
-    remainingLabel: "₱87,500 remaining",
-    interestRate: "14% p.a.",
-    term: "2025-03-01 to 2026-12-01",
-    principal: "₱500,000",
-    outstanding: "₱312,000",
-    totalPaid: "₱188,000",
-    monthlyPayment: "₱14,200",
-    nextDue: "2026-09-05",
-    nextDueDays: "(7 days)",
-    trend: [500000, 420000, 340000, 260000, 180000, 100000, 20000],
-  },
-  agrarian: {
-    id: "agrarian",
-    name: "Agrarian Reform Fund",
-    subtitle: "Crop Production Capital",
-    status: "active",
-    progress: 42,
-    remainingLabel: "₱87,500 remaining",
-    interestRate: "10% p.a.", // placeholder — not specified
-    term: "2025-06-01 to 2027-06-01", // placeholder — not specified
-    principal: "₱500,000", // placeholder — not specified
-    outstanding: "₱87,500",
-    totalPaid: "₱412,500", // placeholder — not specified
-    monthlyPayment: "₱8,600", // placeholder — not specified
-    nextDue: "2026-09-15",
-    nextDueDays: "(17 days)",
-    trend: [500000, 420000, 340000, 260000, 180000, 100000, 87500], // placeholder
-  },
-  seasonal: {
-    id: "seasonal",
-    name: "Seasonal Loan",
-    subtitle: "Farmers SACCO",
-    status: "paid",
-  },
+const STATUS_CONFIG = {
+  pending: { label: "Pending review", Icon: Clock, iconColor: "text-amber-500", card: "bg-white border-gray-100" },
+  approved: { label: "Approved", Icon: CheckCircle2, iconColor: "text-blue-500", card: "bg-white border-gray-100" },
+  active: { label: "Active", Icon: Clock, iconColor: "text-amber-500", card: "border-2 border-[#4f7331] bg-white" },
+  paid_off: { label: "Fully repaid", Icon: CheckCircle2, iconColor: "text-emerald-600", card: "bg-[#f0fdf4] border-emerald-300" },
+  defaulted: { label: "Defaulted", Icon: AlertTriangle, iconColor: "text-red-500", card: "bg-red-50 border-red-200" },
+  rejected: { label: "Rejected", Icon: XCircle, iconColor: "text-gray-400", card: "bg-gray-50 border-gray-200" },
 };
 
-const CHART_MONTHS = ["Mar", "Jun", "Sep", "Dec", "Mar '26", "Jun '26", "Sep '26"];
-const CHART_MAX = 600000;
-const Y_AXIS_LABELS = ["₱600k", "₱450k", "₱300k", "₱150k", "₱0"];
-const CHART_W = 600;
-const CHART_H = 200;
+function KPICard({ label, value, valueColor }) {
+  return (
+    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+      <p className="text-xs font-medium text-gray-400">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${valueColor}`}>{value}</p>
+    </div>
+  );
+}
 
 function LoanSelectorCard({ loan, isSelected, onSelect }) {
-  if (loan.status === "paid") {
-    return (
-      <div className="bg-[#f0fdf4] border border-emerald-300 rounded-2xl p-4">
-        <div className="flex items-start justify-between">
-          <h3 className="font-bold text-gray-900">{loan.name}</h3>
-          <span className="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center shrink-0">
-            <CheckCircle2 size={14} className="text-white" />
-          </span>
-        </div>
-        <p className="text-xs text-gray-400 mt-0.5">{loan.subtitle}</p>
-        <p className="mt-3 text-xs font-semibold text-emerald-700">
-          Fully repaid
-        </p>
-      </div>
-    );
-  }
+  const config = STATUS_CONFIG[loan.status] || STATUS_CONFIG.pending;
+  const Icon = config.Icon;
 
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-left bg-white border rounded-2xl p-4 transition-colors ${
-        isSelected ? "border-[#4d6b41] ring-1 ring-[#4d6b41]" : "border-gray-100"
+      className={`w-full text-left border rounded-2xl p-4 transition-colors ${config.card} ${
+        isSelected ? "ring-1 ring-[#4d6b41]" : ""
       }`}
     >
       <div className="flex items-start justify-between">
-        <h3 className="font-bold text-gray-900">{loan.name}</h3>
-        <Clock size={16} className="text-amber-500" />
+        <h3 className="font-bold text-gray-900">{loan.cooperative?.name || "Cooperative"}</h3>
+        <Icon size={16} className={config.iconColor} />
       </div>
-      <p className="text-xs text-gray-400 mt-0.5">{loan.subtitle}</p>
-
-      <div className="mt-3 w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-green-600 rounded-full"
-          style={{ width: `${loan.progress}%` }}
-        />
-      </div>
+      <p className="text-xs text-gray-400 mt-0.5">
+        Requested {new Date(loan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+      </p>
 
       <div className="mt-2 flex items-center justify-between text-xs">
-        <span className="text-gray-500">{loan.progress}% paid</span>
-        <span className="text-gray-700 font-medium">{loan.remainingLabel}</span>
+        <span className="text-gray-500">{config.label}</span>
+        <span className="text-gray-700 font-medium">{peso(loan.principalAmount)}</span>
       </div>
     </button>
   );
 }
 
+// Shows only real, verified fields — no invented "outstanding balance" or
+// "total paid" figures, since there's no real payment-recording flow yet
+// (LoanPayment is read-only: payment gateway integration isn't finalized).
 function LoanDetailPanel({ loan }) {
+  const config = STATUS_CONFIG[loan.status] || STATUS_CONFIG.pending;
   const stats = [
-    { label: "Principal", value: loan.principal, color: "text-gray-900" },
-    { label: "Outstanding", value: loan.outstanding, color: "text-red-600" },
-    { label: "Total Paid", value: loan.totalPaid, color: "text-green-700" },
-    {
-      label: "Monthly Payment",
-      value: loan.monthlyPayment,
-      color: "text-amber-700",
-    },
+    { label: "Principal", value: peso(loan.principalAmount), color: "text-gray-900" },
+    { label: "Interest Rate", value: `${loan.interestRatePercent}% p.a.`, color: "text-gray-900" },
+    { label: "Term", value: `${loan.termMonths} months`, color: "text-gray-900" },
+    { label: "Status", value: config.label, color: "text-gray-900" },
   ];
 
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-      <h3 className="font-bold text-gray-900 underline decoration-2 decoration-blue-500 underline-offset-4">
-        {loan.name}
-      </h3>
-      <p className="text-xs text-gray-400 mt-0.5">{loan.subtitle}</p>
-      <p className="text-xs text-gray-500 mt-1">
-        {loan.interestRate} · {loan.term}
+      <h3 className="font-bold text-gray-900">{loan.cooperative?.name || "Cooperative"}</h3>
+      <p className="text-xs text-gray-400 mt-0.5">
+        Requested {new Date(loan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
       </p>
 
       <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
         {stats.map((s) => (
-          <div
-            key={s.label}
-            className="border border-gray-100 rounded-xl p-3"
-          >
+          <div key={s.label} className="border border-gray-100 rounded-xl p-3">
             <p className="text-[11px] text-gray-400">{s.label}</p>
             <p className={`text-sm font-bold ${s.color}`}>{s.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900">
-        <Info size={14} className="shrink-0" />
-        Next Payment due:{" "}
-        <span className="font-bold">{loan.nextDue}</span>{" "}
-        {loan.nextDueDays}
-      </div>
-    </div>
-  );
-}
-
-function OutstandingTrendChart({ loan }) {
-  const points = loan.trend.map((v, i) => ({
-    x: (i / (loan.trend.length - 1)) * CHART_W,
-    y: CHART_H - (v / CHART_MAX) * CHART_H,
-  }));
-  const path = points.map((p) => `${p.x},${p.y}`).join(" L ");
-
-  return (
-    <div className="mt-6 bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
-      <h3 className="font-bold text-gray-900">Outstanding Balance Trend</h3>
-
-      <div className="mt-6 flex gap-3">
-        <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
-          {Y_AXIS_LABELS.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
+      {loan.status === "pending" && (
+        <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900">
+          <Info size={14} className="shrink-0" />
+          Waiting for {loan.cooperative?.name || "the cooperative"} to review this request.
         </div>
-
-        <div className="flex-1 border-l border-gray-200 pl-4">
-          <svg
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            className="w-full h-48"
-            preserveAspectRatio="none"
-          >
-            <path d={`M ${path}`} fill="none" stroke="#374151" strokeWidth="1.5" />
-          </svg>
-          <div className="flex justify-between mt-2 px-1">
-            {CHART_MONTHS.map((m) => (
-              <span key={m} className="text-[10px] text-gray-500">
-                {m}
-              </span>
-            ))}
-          </div>
+      )}
+      {loan.status === "active" && loan.dueDate && (
+        <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900">
+          <Info size={14} className="shrink-0" />
+          Due {new Date(loan.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
         </div>
-      </div>
+      )}
+      {loan.status === "rejected" && (
+        <div className="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-gray-600">
+          <XCircle size={14} className="shrink-0" />
+          This request was not approved.
+        </div>
+      )}
     </div>
   );
 }
 
-function TextField({ label, required, value, onChange, error, placeholder, type = "text" }) {
-  return (
-    <div>
-      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-        {label} {required && "*"}
-      </label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`bg-gray-50 border rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30 ${
-          error ? "border-red-400" : "border-gray-200"
-        }`}
-      />
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
-    </div>
-  );
-}
+const selectClass =
+  "bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30";
 
-function SelectField({ label, required, value, onChange, options, error }) {
-  return (
-    <div>
-      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-        {label} {required && "*"}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={`bg-gray-50 border rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30 ${
-          error ? "border-red-400" : "border-gray-200"
-        }`}
-      >
-        <option value="" disabled>
-          Select...
-        </option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
-    </div>
-  );
-}
+// Requests a real loan from a real, active cooperative — status is always
+// decided by the backend (forced to "pending" there regardless of anything
+// sent here), so there's nothing to pick for that on this form.
+function NewLoanModal({ cooperatives, onSave, onCancel }) {
+  const [cooperative, setCooperative] = useState(cooperatives[0]?._id || "");
+  const [principalAmount, setPrincipalAmount] = useState("");
+  const [interestRatePercent, setInterestRatePercent] = useState("");
+  const [termMonths, setTermMonths] = useState("12");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-const EMPTY_LOAN_FORM = {
-  name: "",
-  lender: "",
-  loanType: "",
-  principal: "",
-  interestRate: "",
-  loanTerm: "",
-  disbursementDate: "",
-  maturityDate: "",
-  paymentFrequency: "",
-  firstPaymentDue: "",
-  monthlyPayment: "",
-  notes: "",
-};
+  async function handleSave() {
+    const principal = parseFloat(principalAmount);
+    const rate = parseFloat(interestRatePercent);
+    const term = parseInt(termMonths, 10);
 
-function NewLoanModal({ onSave, onCancel }) {
-  const [form, setForm] = useState(EMPTY_LOAN_FORM);
-  const [errors, setErrors] = useState({});
-  const [fileName, setFileName] = useState("");
-  const [isDragging, setIsDragging] = useState(false);
-
-  function update(field, value) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: undefined }));
-  }
-
-  // Loan/Debt Name: letters, numbers, spaces, and common punctuation only —
-  // blocks stray symbols while still allowing things like "Tractor Loan #2"
-  // or "Juan's Farm Expansion".
-  function updateName(rawValue) {
-    const cleaned = rawValue.replace(/[^a-zA-Z0-9\s.,'&()-]/g, "");
-    update("name", cleaned);
-  }
-
-  // Principal Amount: digits and commas only, live-stripped as you type —
-  // matches the "e.g., 500,000" placeholder format.
-  function updatePrincipal(rawValue) {
-    const cleaned = rawValue.replace(/[^0-9,]/g, "");
-    update("principal", cleaned);
-  }
-
-  // Interest Rate: digits and at most one decimal point.
-  function updateInterestRate(rawValue) {
-    let cleaned = rawValue.replace(/[^0-9.]/g, "");
-    const firstDot = cleaned.indexOf(".");
-    if (firstDot !== -1) {
-      cleaned =
-        cleaned.slice(0, firstDot + 1) +
-        cleaned.slice(firstDot + 1).replace(/\./g, "");
+    if (!cooperative) {
+      setError("Select a cooperative.");
+      return;
     }
-    update("interestRate", cleaned);
-  }
+    if (!principal || principal <= 0 || principal > 500000) {
+      setError("Enter a principal amount between ₱1 and ₱500,000.");
+      return;
+    }
+    if (rate === undefined || isNaN(rate) || rate < 0 || rate > 100) {
+      setError("Enter an interest rate between 0 and 100.");
+      return;
+    }
+    if (!term || term < 1 || term > 120) {
+      setError("Enter a term between 1 and 120 months.");
+      return;
+    }
 
-  // Monthly Payment: same digits-and-commas rule as Principal.
-  function updateMonthlyPayment(rawValue) {
-    const cleaned = rawValue.replace(/[^0-9,]/g, "");
-    update("monthlyPayment", cleaned);
-  }
-
-  function handleFiles(files) {
-    if (files && files[0]) setFileName(files[0].name);
-  }
-
-  function handleSave() {
-    const principalNum = parseFloat(String(form.principal).replace(/,/g, ""));
-    const interestNum = parseFloat(form.interestRate);
-
-    const newErrors = {
-      name: !form.name.trim() ? "Loan/Debt name is required." : null,
-      lender: !form.lender ? "Select a lender/institution." : null,
-      loanType: !form.loanType ? "Select a loan type." : null,
-      principal: !form.principal.trim()
-        ? "Principal amount is required."
-        : !principalNum || principalNum <= 0
-        ? "Enter a valid amount greater than 0."
-        : null,
-      interestRate: !form.interestRate.trim()
-        ? "Interest rate is required."
-        : Number.isNaN(interestNum) || interestNum <= 0 || interestNum > 100
-        ? "Enter a valid rate between 0 and 100."
-        : null,
-      disbursementDate: !form.disbursementDate ? "Disbursement date is required." : null,
-      maturityDate: !form.maturityDate
-        ? "Maturity date is required."
-        : form.disbursementDate && form.maturityDate <= form.disbursementDate
-        ? "Maturity date must be after the disbursement date."
-        : null,
-      firstPaymentDue: !form.firstPaymentDue
-        ? "First payment due date is required."
-        : form.disbursementDate && form.firstPaymentDue < form.disbursementDate
-        ? "First payment can't be before the disbursement date."
-        : null,
-    };
-    setErrors(newErrors);
-    if (Object.values(newErrors).some(Boolean)) return;
-
-    onSave({
-      id: `loan-${Date.now()}`,
-      name: form.name.trim(),
-      subtitle: form.loanType,
-      status: "active",
-      progress: 0, // brand new loan, nothing paid yet
-      remainingLabel: `₱${principalNum.toLocaleString()} remaining`,
-      interestRate: `${form.interestRate}% p.a.`,
-      term: `${form.disbursementDate} to ${form.maturityDate}`,
-      principal: `₱${principalNum.toLocaleString()}`,
-      outstanding: `₱${principalNum.toLocaleString()}`, // nothing paid yet
-      totalPaid: "₱0",
-      monthlyPayment: form.monthlyPayment
-        ? `₱${form.monthlyPayment}`
-        : "Not set",
-      nextDue: form.firstPaymentDue,
-      nextDueDays: "",
-      trend: [principalNum, principalNum], // flat line — no payment history yet
-      lender: form.lender,
-      loanTerm: form.loanTerm,
-      paymentFrequency: form.paymentFrequency,
-      notes: form.notes,
-      documentName: fileName || null,
-    });
+    setSaving(true);
+    setError("");
+    try {
+      const newLoan = await authedRequest("/api/loans", {
+        method: "POST",
+        body: { cooperative, principalAmount: principal, interestRatePercent: rate, termMonths: term },
+      });
+      onSave(newLoan);
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="bg-white rounded-3xl p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-xl font-bold text-gray-900">New Loan</h3>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Add a new loan or debt to keep track of repayments and balances.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onCancel}>
+      <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-xl font-bold text-gray-900">Request a Loan</h3>
+
+        <div>
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Cooperative *</label>
+          {cooperatives.length === 0 ? (
+            <p className="text-sm text-gray-400 bg-gray-50 rounded-xl px-4 py-3">
+              No active cooperatives are available to request a loan from yet.
             </p>
-          </div>
-          <button
-            onClick={onCancel}
-            className="text-gray-400 hover:text-gray-600"
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
+          ) : (
+            <select value={cooperative} onChange={(e) => setCooperative(e.target.value)} className={selectClass}>
+              {cooperatives.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
-        <div className="mt-5 space-y-4">
-          {/* Row 1 */}
-          <TextField
-            label="Loan / Debt Name"
-            required
-            value={form.name}
-            onChange={updateName}
-            error={errors.name}
-            placeholder="e.g., Tractor Loan, Farm Expansion Loan"
-          />
-
-          {/* Row 2 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SelectField
-              label="Lender / Institution"
-              required
-              value={form.lender}
-              onChange={(v) => update("lender", v)}
-              options={LENDER_OPTIONS}
-              error={errors.lender}
-            />
-            <SelectField
-              label="Loan Type"
-              required
-              value={form.loanType}
-              onChange={(v) => update("loanType", v)}
-              options={LOAN_TYPE_OPTIONS}
-              error={errors.loanType}
-            />
-          </div>
-
-          {/* Row 3 */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <TextField
-              label="Principal Amount (PHP)"
-              required
-              value={form.principal}
-              onChange={updatePrincipal}
-              error={errors.principal}
-              placeholder="e.g., 500,000"
-            />
-            <TextField
-              label="Interest Rate (%)"
-              required
-              value={form.interestRate}
-              onChange={updateInterestRate}
-              error={errors.interestRate}
-              placeholder="e.g., 12"
-            />
-            <SelectField
-              label="Loan Term"
-              value={form.loanTerm}
-              onChange={(v) => update("loanTerm", v)}
-              options={LOAN_TERM_OPTIONS}
-            />
-          </div>
-
-          {/* Row 4 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <TextField
-              label="Disbursement Date"
-              required
-              type="date"
-              value={form.disbursementDate}
-              onChange={(v) => update("disbursementDate", v)}
-              error={errors.disbursementDate}
-            />
-            <TextField
-              label="Maturity Date"
-              required
-              type="date"
-              value={form.maturityDate}
-              onChange={(v) => update("maturityDate", v)}
-              error={errors.maturityDate}
-            />
-          </div>
-
-          {/* Row 5 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SelectField
-              label="Payment Frequency"
-              value={form.paymentFrequency}
-              onChange={(v) => update("paymentFrequency", v)}
-              options={PAYMENT_FREQUENCY_OPTIONS}
-            />
-            <TextField
-              label="First Payment Due"
-              required
-              type="date"
-              value={form.firstPaymentDue}
-              onChange={(v) => update("firstPaymentDue", v)}
-              error={errors.firstPaymentDue}
-            />
-          </div>
-
-          {/* Row 6 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <TextField
-              label="Monthly Payment (PHP)"
-              value={form.monthlyPayment}
-              onChange={updateMonthlyPayment}
-              placeholder="e.g., 14,200"
-            />
-            <TextField
-              label="Purpose / Notes"
-              value={form.notes}
-              onChange={(v) => update("notes", v)}
-              placeholder="e.g., Purchase of seeds and fertilizers"
-            />
-          </div>
-
-          {/* Upload area */}
-          <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-              Upload Loan Document (Optional)
-            </label>
-            <label
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
+        <div>
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Principal Amount (PHP) *</label>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium pointer-events-none">
+              ₱
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={principalAmount ? Number(principalAmount).toLocaleString("en-US") : ""}
+              onChange={(e) => {
+                // Strips anything that isn't a digit as it's typed — this
+                // genuinely prevents letters/symbols from ever entering the
+                // field, rather than just validating after the fact. Also
+                // avoids the type="number" quirk where browsers still
+                // accept "e" notation (e.g. typing "1e9" silently becomes
+                // 1,000,000,000, bypassing any max attribute).
+                const digitsOnly = e.target.value.replace(/[^\d]/g, "");
+                setPrincipalAmount(digitsOnly);
               }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                handleFiles(e.dataTransfer.files);
-              }}
-              className={`block border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors ${
-                isDragging
-                  ? "border-green-500 bg-green-50"
-                  : "border-green-300 bg-[#f7faf6]"
+              placeholder="50,000"
+              className={`${selectClass} pl-8 ${
+                Number(principalAmount) > 500000 ? "ring-2 ring-red-400 border-red-300" : ""
               }`}
-            >
-              <UploadCloud size={22} className="mx-auto text-green-600" />
-              <p className="mt-2 text-sm text-gray-700">
-                {fileName || "Click to upload or drag & drop"}
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                PDF, JPG, PNG up to 5MB
-              </p>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                className="hidden"
-                onChange={(e) => handleFiles(e.target.files)}
-              />
-            </label>
+            />
+          </div>
+          <p
+            className={`mt-1 text-[11px] ${
+              Number(principalAmount) > 500000 ? "text-red-500 font-semibold" : "text-gray-400"
+            }`}
+          >
+            {principalAmount ? peso(Number(principalAmount)) : "₱0.00"} / ₱500,000.00 max
+            {Number(principalAmount) > 500000 && " — over the limit"}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Interest Rate (% p.a.) *</label>
+            <input
+              type="number"
+              value={interestRatePercent}
+              onChange={(e) => setInterestRatePercent(e.target.value)}
+              placeholder="e.g., 12"
+              max={100}
+              className={selectClass}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Term (months) *</label>
+            <select value={termMonths} onChange={(e) => setTermMonths(e.target.value)} className={selectClass}>
+              {[6, 12, 24, 36, 60].map((m) => (
+                <option key={m} value={m}>
+                  {m} months
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-          >
+        {error && <p className="text-xs text-red-500">{error}</p>}
+
+        <div className="flex items-center justify-end gap-3">
+          <button onClick={onCancel} className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="px-6 py-2 rounded-xl bg-[#5c8247] hover:bg-[#4d6b41] text-white transition-colors"
+            disabled={saving || cooperatives.length === 0}
+            className="px-6 py-2 rounded-xl bg-[#4f7331] text-white hover:bg-[#3f6238] transition-colors disabled:opacity-60"
           >
-            Save
+            {saving ? "Submitting…" : "Submit Request"}
           </button>
         </div>
       </div>
@@ -594,80 +252,124 @@ function NewLoanModal({ onSave, onCancel }) {
 }
 
 export default function LoansDebt() {
-  const [loans, setLoans] = useState(INITIAL_LOANS);
-  const [selectedLoanId, setSelectedLoanId] = useState("landbank");
-  const [isAddLoanOpen, setIsAddLoanOpen] = useState(false);
-  const selectedLoan = loans[selectedLoanId];
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [loans, setLoans] = useState([]);
+  const [cooperatives, setCooperatives] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [isNewLoanOpen, setIsNewLoanOpen] = useState(false);
 
-  function handleSaveNewLoan(newLoan) {
-    setLoans((prev) => ({ ...prev, [newLoan.id]: newLoan }));
-    setSelectedLoanId(newLoan.id);
-    setIsAddLoanOpen(false);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setLoadError("");
+      try {
+        const [loansData, coopsData] = await Promise.all([
+          authedRequest("/api/loans?limit=100"),
+          authedRequest("/api/cooperatives"),
+        ]);
+        if (cancelled) return;
+        setLoans(loansData);
+        setCooperatives(coopsData);
+        setSelectedId(loansData[0]?._id ?? null);
+      } catch (err) {
+        if (!cancelled) setLoadError(err.message || "Failed to load your data.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function handleNewLoan(newLoan) {
+    setLoans((prev) => [newLoan, ...prev]);
+    setSelectedId(newLoan._id);
+    setIsNewLoanOpen(false);
   }
+
+  if (loading) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Loans & Debt</h2>
+        <div className="mt-6 text-center text-gray-400 text-sm py-10">Loading…</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Loans & Debt</h2>
+        <div className="mt-6 bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-600 text-sm">
+          {loadError}
+        </div>
+      </div>
+    );
+  }
+
+  const selectedLoan = loans.find((l) => l._id === selectedId) || null;
+  const activeOrApproved = loans.filter((l) => l.status === "active" || l.status === "approved");
+  const totalOutstanding = activeOrApproved.reduce((sum, l) => sum + l.principalAmount, 0);
+  const pendingCount = loans.filter((l) => l.status === "pending").length;
 
   return (
     <div>
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-gray-900">
-            Loan & Debt Management
-          </h2>
-          <p className="mt-1 text-gray-500">
-            Track repayments, interest, and outstanding balances
-          </p>
+          <h2 className="text-3xl font-bold text-gray-900">Loans & Debt</h2>
+          <p className="mt-1 text-gray-500">Track your loan requests and active borrowing</p>
         </div>
         <button
-          onClick={() => setIsAddLoanOpen(true)}
-          className="mt-12 bg-[#5c8247] hover:bg-[#4d6b41] text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm transition-colors"
+          onClick={() => setIsNewLoanOpen(true)}
+          className="mt-12 bg-[#3f6238] hover:bg-[#34512e] text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm transition-colors"
         >
-          <Plus size={16} /> Add Loan
+          <Plus size={16} /> Request a Loan
         </button>
       </div>
 
-      {/* KPI cards */}
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {KPI_CARDS.map((card) => (
-          <div
-            key={card.label}
-            className="bg-white rounded-xl p-5 shadow-sm border border-gray-100"
-          >
-            <p className="text-sm text-gray-700">{card.label}</p>
-            <p className={`mt-1 text-2xl font-bold ${card.valueColor}`}>
-              {card.value}
+        <KPICard label="Approved / Active Principal" value={peso(totalOutstanding)} valueColor="text-[#b83838]" />
+        <KPICard label="Pending Requests" value={pendingCount} valueColor="text-[#be8238]" />
+        <KPICard label="Total Loans" value={loans.length} valueColor="text-gray-900" />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="space-y-3">
+          {loans.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">
+              No loans yet — click "Request a Loan" to submit your first request.
             </p>
-            {card.subtext && (
-              <p className="mt-0.5 text-xs text-gray-400">{card.subtext}</p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Two-column layout */}
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: loan selector cards */}
-        <div className="space-y-4">
-          {Object.values(loans).map((loan) => (
-            <LoanSelectorCard
-              key={loan.id}
-              loan={loan}
-              isSelected={selectedLoanId === loan.id}
-              onSelect={() => setSelectedLoanId(loan.id)}
-            />
-          ))}
+          ) : (
+            loans.map((loan) => (
+              <LoanSelectorCard
+                key={loan._id}
+                loan={loan}
+                isSelected={selectedId === loan._id}
+                onSelect={() => setSelectedId(loan._id)}
+              />
+            ))
+          )}
         </div>
 
-        {/* Right: selected loan details + trend chart */}
-        <div>
-          <LoanDetailPanel loan={selectedLoan} />
-          <OutstandingTrendChart loan={selectedLoan} />
+        <div className="lg:col-span-2">
+          {selectedLoan ? (
+            <LoanDetailPanel loan={selectedLoan} />
+          ) : (
+            <div className="bg-white border border-gray-200 rounded-2xl p-12 flex items-center justify-center min-h-[200px] shadow-sm">
+              <p className="text-gray-400 text-sm">Select a loan to view details</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {isAddLoanOpen && (
-        <NewLoanModal
-          onSave={handleSaveNewLoan}
-          onCancel={() => setIsAddLoanOpen(false)}
-        />
+      {isNewLoanOpen && (
+        <NewLoanModal cooperatives={cooperatives} onSave={handleNewLoan} onCancel={() => setIsNewLoanOpen(false)} />
       )}
     </div>
   );

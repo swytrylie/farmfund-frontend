@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Mail, Lock, Eye, EyeOff, TrendingUp, CreditCard, Lightbulb } from "lucide-react";
-import { checkAdminCredentials } from "../../mocks/admin/adminAuth.mock";
+import { apiRequest } from "../../api";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -36,18 +36,35 @@ export default function AdminLogin({ onLoginSuccess }) {
     if (Object.values(newErrors).some(Boolean)) return;
 
     setLoading(true);
-    const adminUser = await checkAdminCredentials(email, password);
-    setLoading(false);
+    try {
+      // Same real /api/auth/login endpoint every account type uses — an
+      // admin account is just a User document with role: "admin". There is
+      // no separate admin auth endpoint, and none is needed.
+      const result = await apiRequest("/api/auth/login", {
+        method: "POST",
+        body: { email: email.trim(), password },
+      });
 
-    if (!adminUser) {
-      setErrors({ password: "Invalid administrator credentials." });
-      return;
+      // The credentials were genuinely valid, but this portal is for admins
+      // only — a valid non-admin login must still be rejected here, even
+      // though the backend has no way to know which login page asked.
+      if (result.user.role !== "admin") {
+        setErrors({ password: "This account does not have administrator access." });
+        setLoading(false);
+        return;
+      }
+
+      onLoginSuccess(result); // { accessToken, user }
+    } catch (err) {
+      if (err.status === 403) {
+        setErrors({ password: "Account temporarily locked due to too many failed attempts." });
+      } else if (err.status === 401) {
+        setErrors({ password: "Invalid email or password." });
+      } else {
+        setErrors({ password: err.message || "Something went wrong. Please try again." });
+      }
+      setLoading(false);
     }
-
-    onLoginSuccess({
-      accessToken: null, // mocked — no real backend admin session yet
-      user: adminUser,
-    });
   }
 
   return (
@@ -94,10 +111,10 @@ export default function AdminLogin({ onLoginSuccess }) {
         <div className="lg:col-span-5 flex items-center justify-center">
           <div className="backdrop-blur-md bg-white/20 border border-white/30 rounded-2xl p-8 shadow-2xl max-w-md w-full">
             <h2 className="text-2xl font-bold text-white mb-2 text-center">
-              Welcome Back!
+              Welcome back
             </h2>
-            <span className="block text-xs font-semibold uppercase tracking-wider text-green-100 bg-emerald-900/40 px-3 py-1 rounded-full w-fit mx-auto mb-6">
-              Admin
+            <span className="block text-xs font-semibold uppercase tracking-wider text-white bg-[#42BD41]/40 px-3 py-1 rounded-full w-fit mx-auto mb-6">
+              Administrator Access
             </span>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -106,6 +123,7 @@ export default function AdminLogin({ onLoginSuccess }) {
                   <Mail size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="email"
+                    autoComplete="username"
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
@@ -125,6 +143,7 @@ export default function AdminLogin({ onLoginSuccess }) {
                   <Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
@@ -158,10 +177,6 @@ export default function AdminLogin({ onLoginSuccess }) {
                 {loading ? "Signing in…" : "Log In"}
               </button>
             </form>
-
-            <p className="text-[11px] text-white/60 text-center">
-              For this demo: admin@gmail.com / Admin1234!
-            </p>
           </div>
         </div>
       </div>

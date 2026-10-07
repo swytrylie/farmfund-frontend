@@ -57,6 +57,18 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     const [serverError, setServerError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Shown after a successful register() call — register() no longer logs
+  // anyone in immediately, since the account now genuinely needs to be
+  // verified first. pendingOrgName is only ever set for the organization
+  // path, carrying register()'s cooperative name through to the final
+  // hand-off, since verify-signup's own response doesn't include it.
+  const [awaitingVerification, setAwaitingVerification] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [pendingOrgName, setPendingOrgName] = useState(null);
+
    const update = (field) => (e) => {
     const value = e.target.value;
     setData((prev) => ({ ...prev, [field]: value }));
@@ -109,25 +121,30 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     setServerError("");
     if (Object.keys(validationErrors).length > 0) return;
 
-    // No backend route for organizations yet, so this stays a design-only,
-    // mocked flow — but it now goes straight to the Org Dashboard instead
-    // of the pending-approval screen, per the updated spec. The payload
-    // carries everything OrgDashboard needs to greet the real person by
-    // name instead of a hardcoded example.
-    if (isOrganization) {
-      onSwitchMode("org-signup-success", {
-        accountType: "organization",
-        firstName: data.firstName.trim(),
-        lastName: data.lastName.trim(),
-        email: data.email.trim(),
-        orgName: data.orgName.trim(),
-        role: "Owner",
-      });
-      return;
-    }
-
     setLoading(true);
     try {
+      if (isOrganization) {
+        // register() creates the User (isEmailVerified: false), a new
+        // Cooperative (status: "pending", awaiting admin approval), and
+        // links them as its owner — all in one real backend step. It
+        // genuinely can't log in yet though, until the OTP just emailed
+        // to them is confirmed — so this no longer calls login()
+        // immediately the way it used to.
+        const registerResult = await apiRequest("/api/auth/register", {
+          method: "POST",
+          body: {
+            firstName: data.firstName.trim(),
+            lastName: data.lastName.trim(),
+            email: data.email.trim(),
+            password: data.password,
+            orgName: data.orgName.trim(),
+          },
+        });
+        setPendingOrgName(registerResult.cooperative?.name);
+        setAwaitingVerification(true);
+        return;
+      }
+
       await apiRequest("/api/auth/register", {
         method: "POST",
         body: {
@@ -137,13 +154,109 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
           password: data.password,
         },
       });
-      onSwitchMode("account-success", selectedRole);
+      setAwaitingVerification(true);
     } catch (err) {
       const detail = Array.isArray(err.details) && err.details[0]?.message;
       setServerError(detail || err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleVerifyOtp(e) {
+    e.preventDefault();
+    if (verifying) return;
+    setOtpError("");
+    setVerifying(true);
+    try {
+      // verify-signup's response is a REAL session, the same shape
+      // login() returns — flipping isEmailVerified to true and logging
+      // them in happen together, server-side, in one call.
+      const result = await apiRequest("/api/auth/verify-signup", {
+        method: "POST",
+        body: { email: data.email.trim(), code: otpCode },
+      });
+
+      if (isOrganization) {
+        onSwitchMode("org-signup-success", {
+          accessToken: result.accessToken,
+          user: {
+            ...result.user,
+            accountType: "organization",
+            orgName: pendingOrgName,
+          },
+        });
+      } else {
+        onSwitchMode("account-success", selectedRole);
+      }
+    } catch (err) {
+      setOtpError(err.message || "Invalid or expired code.");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    if (resending) return;
+    setResending(true);
+    setOtpError("");
+    try {
+      await apiRequest("/api/auth/resend-signup-otp", {
+        method: "POST",
+        body: { email: data.email.trim() },
+      });
+      setStatusMessage("A new code has been sent to your email.");
+    } catch (err) {
+      setOtpError(err.message || "Couldn't resend the code. Please try again.");
+    } finally {
+      setResending(false);
+    }
+  }
+
+  if (awaitingVerification) {
+    return (
+      <>
+        <h2 className="text-2xl font-bold text-white text-center">Check your email</h2>
+        <p className="mt-1 text-center text-sm text-white/70">
+          We sent a 6-digit code to <strong>{data.email.trim()}</strong>. Enter it below to finish creating your account.
+        </p>
+
+        <form className="space-y-4 mt-6" onSubmit={handleVerifyOtp} noValidate>
+          <div>
+            <FieldLabel>Verification Code</FieldLabel>
+            <FormInput
+              placeholder="123456"
+              value={otpCode}
+              onChange={(e) => {
+                setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                setOtpError("");
+              }}
+              error={otpError}
+              compact
+            />
+          </div>
+
+          {statusMessage && <p className="text-sm text-green-300">{statusMessage}</p>}
+
+          <button
+            type="submit"
+            disabled={verifying || otpCode.length !== 6}
+            className="w-full bg-[#5bc252] hover:bg-[#4d9e45] text-white font-semibold rounded-xl py-3 transition-colors disabled:opacity-60"
+          >
+            {verifying ? "Verifying…" : "Verify and continue"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResendOtp}
+            disabled={resending}
+            className="w-full text-center text-sm text-white/70 hover:text-white underline disabled:opacity-60"
+          >
+            {resending ? "Resending…" : "Didn't get a code? Resend"}
+          </button>
+        </form>
+      </>
+    );
   }
 
   return (
@@ -260,7 +373,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
                 <FieldLabel>Email Address</FieldLabel>
                 <FormInput
                   type="email"
-                  placeholder="e.g., owner@gmail.com"
+                  placeholder="e.g., owner@kfacoop.ph"
                   value={data.email}
                   onChange={update("email")}
                   error={errors.email}
@@ -333,7 +446,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
                 <FieldLabel>Email Address</FieldLabel>
                 <FormInput
                   type="email"
-                  placeholder="e.g., owner@gmail.com"
+                  placeholder="e.g., owner@kfacoop.ph"
                   value={data.email}
                   onChange={update("email")}
                   error={errors.email}

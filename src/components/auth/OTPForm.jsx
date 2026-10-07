@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
+import { apiRequest } from "../../api";
+import { setPendingReset } from "../../lib/passwordReset";
+
+// The server explains exactly what was wrong (e.g. "Incorrect code. 3 attempts
+// left."); show that, not a generic failure.
+const messageFrom = (err, fallback) =>
+  (Array.isArray(err?.details) && err.details[0]?.message) || err?.message || fallback;
 
 const CODE_LENGTH = 6;
-const RESEND_SECONDS = 45;
-const TEST_OTP_CODE = "123456"; // Temporary fixed code until a real backend generates one
+// Matches the server: a new code can be requested once every 60 seconds.
+const RESEND_SECONDS = 60;
 
 export default function OTPForm({ email, onSwitchMode }) {
   const [digits, setDigits] = useState(Array(CODE_LENGTH).fill(""));
@@ -12,6 +19,8 @@ export default function OTPForm({ email, onSwitchMode }) {
   const [resendNotice, setResendNotice] = useState("");
   const [error, setError] = useState("");
   const inputRefs = useRef([]);
+  const verifyingRef = useRef(false);
+  const resendingRef = useRef(false);
 
   // Countdown ticks every second, stops at 0
   useEffect(() => {
@@ -28,19 +37,34 @@ export default function OTPForm({ email, onSwitchMode }) {
     return `${minutes}:${seconds}`;
   }
 
-  // Mock verification: checks against a fixed test code until a real backend exists.
-  // Shows a brief "Verifying..." state, then hands off to the new-password screen.
-  function runMockVerification(codeDigits = digits) {
+  // Checks the code with the server. The server allows 5 wrong guesses per code
+  // and then destroys it; a correct code is exchanged for a one-time "reset
+  // ticket" (held only in memory) that the next screen needs to set the password.
+  async function verifyCode(codeDigits = digits) {
+    if (verifyingRef.current) return;
+    const code = codeDigits.join("");
+    if (code.length !== CODE_LENGTH) {
+      setError("Enter all 6 digits.");
+      return;
+    }
+    verifyingRef.current = true;
     setIsVerifying(true);
     setError("");
-    setTimeout(() => {
+    try {
+      const result = await apiRequest("/api/auth/forgot-password/verify", {
+        method: "POST",
+        body: { email, code },
+      });
+      setPendingReset(email, result.resetToken);
+      onSwitchMode("new-password", email);
+    } catch (err) {
+      setError(messageFrom(err, "Incorrect code."));
+      setDigits(Array(CODE_LENGTH).fill(""));
+      inputRefs.current[0]?.focus();
+    } finally {
+      verifyingRef.current = false;
       setIsVerifying(false);
-      if (codeDigits.join("") === TEST_OTP_CODE) {
-        onSwitchMode("new-password", email);
-      } else {
-        setError(`Incorrect code. (Hint: try ${TEST_OTP_CODE} for now.)`);
-      }
-    }, 1000);
+    }
   }
 
   function handleChange(index, rawValue) {
@@ -58,7 +82,7 @@ export default function OTPForm({ email, onSwitchMode }) {
 
     // Auto-proceed to verification once all 6 boxes are filled
     if (value && index === CODE_LENGTH - 1 && next.every((d) => d)) {
-      runMockVerification(next);
+      verifyCode(next);
     }
   }
 
@@ -72,21 +96,25 @@ export default function OTPForm({ email, onSwitchMode }) {
   function handleVerifyClick(e) {
     e.preventDefault();
     if (isVerifying) return;
-    // Manual click works too, regardless of whether all boxes are technically filled —
-    // this is mock verification, so we don't block on real validation here.
-    runMockVerification();
+    verifyCode();
   }
 
-  function handleResend() {
-    if (secondsLeft > 0) return;
-    // TODO: trigger a real resend-code API call here
-    setDigits(Array(CODE_LENGTH).fill(""));
-    setSecondsLeft(RESEND_SECONDS);
+  async function handleResend() {
+    if (secondsLeft > 0 || resendingRef.current) return;
+    resendingRef.current = true;
     setError("");
-    inputRefs.current[0]?.focus();
-
-    setResendNotice("New mock OTP sent to your email!");
-    setTimeout(() => setResendNotice(""), 3000);
+    try {
+      await apiRequest("/api/auth/forgot-password", { method: "POST", body: { email } });
+      setDigits(Array(CODE_LENGTH).fill(""));
+      setSecondsLeft(RESEND_SECONDS);
+      inputRefs.current[0]?.focus();
+      setResendNotice("A new code has been sent to your email.");
+      setTimeout(() => setResendNotice(""), 3000);
+    } catch (err) {
+      setError(messageFrom(err, "Couldn't resend the code. Please try again."));
+    } finally {
+      resendingRef.current = false;
+    }
   }
 
   return (

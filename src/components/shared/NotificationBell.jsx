@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Bell, CreditCard, AlertTriangle, Calendar, Droplet, X } from "lucide-react";
-import { FILTERS } from "../../mocks/individual/alerts.mock";
+import { FILTERS } from "../../lib/alertEngine";
 
 // Same icon/color mapping as the full Alerts page (by iconKey), just with
 // bell-specific card styling since this is a compact popup, not a full page.
@@ -41,7 +41,10 @@ export default function NotificationBell({
   const [activeCategory, setActiveCategory] = useState("All");
   const containerRef = useRef(null);
 
-  const unreadCount = alerts.filter((a) => a.unread).length;
+  // Every alert shown here is, by definition, one that hasn't been
+  // dismissed yet — a live condition either currently applies or it
+  // doesn't, so there's no separate "unread" state to track on top of that.
+  const unreadCount = alerts.length;
   const visibleAlerts = alerts.filter(
     (a) => activeCategory === "All" || a.categories.includes(activeCategory)
   );
@@ -105,7 +108,7 @@ export default function NotificationBell({
                 onClick={onMarkAllAlertsRead}
                 className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer"
               >
-                Mark as all read
+                Dismiss all
               </button>
             </div>
           </div>
@@ -125,10 +128,6 @@ export default function NotificationBell({
                   key={a.id}
                   className={`relative rounded-xl p-3 ${config.card}`}
                 >
-                  {a.unread && (
-                    <span className="absolute top-3 left-1.5 w-2 h-2 rounded-full bg-green-500" />
-                  )}
-
                   <button
                     onClick={() => onDismissAlert(a.id)}
                     className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"

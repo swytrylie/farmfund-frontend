@@ -1,9 +1,15 @@
 import { useState, useEffect } from "react";
+import { authedRequest } from "../../api";
+
+const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
 const PRIMARY_TABS = [
   { key: "season", label: "Season-on-Season" },
   { key: "yoy", label: "Year-on-Year (Monthly)" },
-  { key: "crop", label: "Crop Revenue Trends" },
+  // "Crop Revenue Trends" isn't included — same reason as elsewhere in this
+  // app: there's no link between FinancialRecord and FarmingCycle, so
+  // there's no honest way to know how much revenue came from which
+  // specific crop.
 ];
 
 const METRIC_TABS = [
@@ -12,103 +18,41 @@ const METRIC_TABS = [
   { key: "profit", label: "Profit" },
 ];
 
-// ---- Season-on-Season bar chart data (unchanged from before) ----
-const CHART_CONFIG = {
-  income: {
-    title: "Income by Season",
-    cardBg: "bg-[#f4fbe9]",
-    cardBorder: "border-[#a3e635]/40",
-    barColor: "bg-[#4d7328]",
-    bars: [
-      { label: "2026", value: 45000 },
-      { label: "2025", value: 8000 },
-      { label: "2026", value: 9000 },
-    ],
-  },
-  expenses: {
-    title: "Expenses by Season",
-    cardBg: "bg-[#fde8e8]",
-    cardBorder: "border-red-200",
-    barColor: "bg-[#7a2828]",
-    bars: [
-      { label: "2026", value: 12000 },
-      { label: "2026", value: 18000 },
-      { label: "2026", value: 5000 },
-      { label: "2025", value: 14000 },
-      { label: "2025", value: 14000 },
-    ],
-  },
-  profit: {
-    title: "Profit by Season",
-    cardBg: "bg-[#fffbeb]",
-    cardBorder: "border-amber-200/80",
-    barColor: "bg-[#c28e46]",
-    bars: [
-      { label: "2026", value: 42000 },
-      { label: "2026", value: 8000 },
-      { label: "2026", value: 4000 },
-      { label: "2025", value: 7000 },
-      { label: "2025", value: 7000 },
-    ],
-  },
+const METRIC_STYLE = {
+  income: { cardBg: "bg-[#f4fbe9]", cardBorder: "border-[#a3e635]/40", barColor: "bg-[#4d7328]" },
+  expenses: { cardBg: "bg-[#fde8e8]", cardBorder: "border-red-200", barColor: "bg-[#7a2828]" },
+  profit: { cardBg: "bg-[#fffbeb]", cardBorder: "border-amber-200/80", barColor: "bg-[#c28e46]" },
 };
-const CHART_MAX = 50000;
-const Y_AXIS_LABELS = ["₱50k", "₱40k", "₱30k", "₱20k", "₱10k"];
 
-const TABLE_ROWS = [
-  {
-    season: "Wet Season 2026",
-    income: "+₱45,000.00",
-    expense: "-₱2,800.00",
-    profit: "₱42,000",
-    profitNegative: false,
-    margin: "93.78%",
-  },
-  {
-    season: "Dry Season 2025",
-    income: "+₱8,200.00",
-    expense: "-₱4,200.00",
-    profit: "₱4,000",
-    profitNegative: false,
-    margin: "48.78%",
-  },
-  {
-    season: "Wet Season 2026",
-    income: "+₱5,000.00",
-    expense: "-₱1,200.00",
-    profit: "₱3,800",
-    profitNegative: false,
-    margin: "76.00%",
-  },
-  {
-    season: "Dry Season 2025",
-    income: "-",
-    expense: "-₱2,280.00",
-    profit: "-₱2,280",
-    profitNegative: true,
-    margin: "N/A",
-  },
-  {
-    season: "Wet Season 2025",
-    income: "-",
-    expense: "-₱2,110.00",
-    profit: "-₱2,110",
-    profitNegative: true,
-    margin: "N/A",
-  },
-];
+// Philippine agricultural convention: wet season June-November, dry season
+// December-May (spanning into the next calendar year). Computed from real
+// transaction dates, not invented.
+function seasonLabelFor(date) {
+  const month = date.getMonth(); // 0-11
+  const year = date.getFullYear();
+  if (month >= 5 && month <= 10) return `Wet Season ${year}`;
+  // Dec-May dry season: Dec belongs to the dry season that continues into
+  // next year; Jan-May belongs to the dry season that started last Dec.
+  return month === 11 ? `Dry Season ${year + 1}` : `Dry Season ${year}`;
+}
 
-// ---- Year-on-Year monthly line chart data ----
-// 2025 figures aren't specified in the spec beyond "last year's curve", so
-// they're derived to land on the stated +21.4% average YoY growth figure.
-const MONTHS = ["Mar", "Apr", "May", "Jun", "Jul", "Aug"];
-const INCOME_2026 = [23000, 38000, 42000, 37000, 36000, 50000];
-const INCOME_2025 = [19000, 31000, 35000, 30000, 29000, 42000];
-const YOY_CHART_MAX = 60000;
-const Y_AXIS_YOY = ["₱60k", "₱50k", "₱40k", "₱30k", "₱20k", "₱10k", "₱0"];
+function buildSeasons(records) {
+  const buckets = {};
+  for (const r of records) {
+    const label = seasonLabelFor(new Date(r.date));
+    if (!buckets[label]) buckets[label] = { season: label, income: 0, expense: 0 };
+    if (r.type === "income") buckets[label].income += r.amount;
+    else buckets[label].expense += r.amount;
+  }
+  // Sort seasons chronologically (by the year + wet/dry ordering embedded in the label)
+  return Object.values(buckets).sort((a, b) => {
+    const yearA = parseInt(a.season.match(/\d+/)[0], 10);
+    const yearB = parseInt(b.season.match(/\d+/)[0], 10);
+    if (yearA !== yearB) return yearA - yearB;
+    return a.season.startsWith("Dry") ? -1 : 1;
+  });
+}
 
-// Converts a set of points into a smooth SVG path using a Catmull-Rom-to-
-// Bezier spline, instead of straight polyline segments between data points.
 function smoothPath(points) {
   if (points.length < 2) return "";
   let d = `M ${points[0].x},${points[0].y}`;
@@ -129,230 +73,203 @@ function smoothPath(points) {
 const CHART_W = 600;
 const CHART_H = 200;
 
-function toPoints(values) {
-  return values.map((v, i) => ({
-    x: (i / (values.length - 1)) * CHART_W,
-    y: CHART_H - (v / YOY_CHART_MAX) * CHART_H,
+function SeasonChart({ metricTab, seasons }) {
+  const style = METRIC_STYLE[metricTab];
+  const bars = seasons.map((s) => ({
+    label: s.season,
+    value: metricTab === "income" ? s.income : metricTab === "expenses" ? s.expense : s.income - s.expense,
   }));
+  const maxValue = Math.max(10000, ...bars.map((b) => Math.abs(b.value)));
+  const yAxisLabels = [0, 0.25, 0.5, 0.75, 1].map((f) => `₱${Math.round((maxValue * (1 - f)) / 1000)}k`);
+
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    setGrown(false);
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => setGrown(true));
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+  }, [metricTab, seasons]);
+
+  return (
+    <div className={`mt-6 border rounded-2xl p-6 shadow-sm mb-6 transition-colors ${style.cardBg} ${style.cardBorder}`}>
+      <h3 className="font-bold text-gray-900">
+        {metricTab === "income" ? "Income" : metricTab === "expenses" ? "Expenses" : "Profit"} by Season
+      </h3>
+
+      {bars.length === 0 ? (
+        <p className="mt-6 text-sm text-gray-400 text-center py-10">No transactions recorded yet.</p>
+      ) : (
+        <div className="mt-6 flex gap-3">
+          <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
+            {yAxisLabels.map((label, i) => (
+              <span key={i}>{label}</span>
+            ))}
+          </div>
+
+          <div className="flex-1 flex items-end h-48 border-l border-gray-200 pl-6">
+            {bars.map((bar, i) => (
+              <div key={bar.label} className="flex flex-col items-center flex-1 px-2">
+                <div className="w-full flex items-end h-40">
+                  <div
+                    className={`w-full rounded-t transition-all duration-700 ease-out ${style.barColor}`}
+                    style={{
+                      height: `${grown ? (Math.abs(bar.value) / maxValue) * 100 : 0}%`,
+                      transitionDelay: `${i * 70}ms`,
+                    }}
+                    title={peso(bar.value)}
+                  />
+                </div>
+                <span className="mt-2 text-[11px] text-gray-500 text-center">{bar.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-// ---- Crop & Livestock Revenue Trends data ----
-// The spec's season labels came through garbled/duplicated in transcription
-// (e.g. "W6 2025" repeated out of order), so this uses a clean chronological
-// reconstruction instead of copying that text literally.
-const CROP_SEASONS = ["WS 2024", "DS 2024", "WS 2025", "DS 2025", "WS 2026", "DS 2026"];
-const CROP_CHART_MAX = 600000;
-const Y_AXIS_CROP = ["₱600k", "₱450k", "₱300k", "₱150k", "₱0"];
+function SeasonTable({ seasons }) {
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider">
+            <th className="pb-2 font-semibold">Season</th>
+            <th className="pb-2 font-semibold">Income</th>
+            <th className="pb-2 font-semibold">Expense</th>
+            <th className="pb-2 font-semibold">Profit</th>
+            <th className="pb-2 font-semibold">Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {seasons.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="py-6 text-center text-gray-400">No seasons with recorded data yet.</td>
+            </tr>
+          ) : (
+            seasons.map((s) => {
+              const profit = s.income - s.expense;
+              const margin = s.income > 0 ? `${((profit / s.income) * 100).toFixed(2)}%` : "N/A";
+              return (
+                <tr key={s.season} className="border-t border-gray-50">
+                  <td className="py-3 text-gray-900 font-medium">{s.season}</td>
+                  <td className={`py-3 font-semibold ${s.income > 0 ? "text-green-600" : "text-gray-400"}`}>
+                    {s.income > 0 ? `+${peso(s.income)}` : "-"}
+                  </td>
+                  <td className="py-3 font-semibold text-red-500">{s.expense > 0 ? `-${peso(s.expense)}` : "-"}</td>
+                  <td className={`py-3 font-semibold ${profit < 0 ? "text-red-500" : "text-amber-700"}`}>{peso(profit)}</td>
+                  <td className="py-3 font-semibold text-green-600">{margin}</td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-const CROP_SERIES = [
-  {
-    key: "corn",
-    label: "Corn",
-    color: "#b8863b",
-    values: [150000, 200000, 280000, 340000, 400000, 390000],
-  },
-  {
-    key: "beans",
-    label: "Beans",
-    color: "#7f9450",
-    values: [190000, 210000, 195000, 205000, 200000, 210000],
-  },
-  {
-    key: "tomatoes",
-    label: "Tomatoes",
-    color: "#dc2626",
-    values: [120000, 90000, 250000, 150000, 180000, 250000],
-  },
-  {
-    key: "dairy",
-    label: "Dairy",
-    color: "#2f6b2f",
-    values: [60000, 70000, 55000, 90000, 75000, 85000],
-  },
-];
+// Compares real income over this year's last 6 months against the SAME
+// 6 calendar months one year earlier — needs real data from both years to
+// be meaningful. For a brand-new account, last year's line will honestly
+// show ₱0 across the board, since there's genuinely nothing there yet.
+function MonthlyYoYChart({ records }) {
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString("en-US", { month: "short" }) });
+  }
 
-function CropRevenueChart() {
-  const toChartPoints = (values) =>
-    values.map((v, i) => ({
-      x: (i / (values.length - 1)) * CHART_W,
-      y: CHART_H - (v / CROP_CHART_MAX) * CHART_H,
-    }));
+  function incomeFor(year, month) {
+    return records
+      .filter((r) => r.type === "income" && new Date(r.date).getFullYear() === year && new Date(r.date).getMonth() === month)
+      .reduce((s, r) => s + r.amount, 0);
+  }
+
+  const thisYearValues = months.map((m) => incomeFor(m.year, m.month));
+  const lastYearValues = months.map((m) => incomeFor(m.year - 1, m.month));
+
+  const maxValue = Math.max(10000, ...thisYearValues, ...lastYearValues);
+  const toPoints = (values) => values.map((v, i) => ({ x: (i / (values.length - 1)) * CHART_W, y: CHART_H - (v / maxValue) * CHART_H }));
+  const pointsThisYear = toPoints(thisYearValues);
+  const pointsLastYear = toPoints(lastYearValues);
+  const pathThisYear = smoothPath(pointsThisYear);
+  const pathLastYear = smoothPath(pointsLastYear);
+
+  const totalThisYear = thisYearValues.reduce((s, v) => s + v, 0);
+  const totalLastYear = lastYearValues.reduce((s, v) => s + v, 0);
+  const growthPercent = totalLastYear > 0 ? Math.round(((totalThisYear - totalLastYear) / totalLastYear) * 100) : null;
+
+  const yAxisLabels = [0, 0.25, 0.5, 0.75, 1].map((f) => `₱${Math.round((maxValue * (1 - f)) / 1000)}k`);
 
   return (
     <div className="mt-6 bg-[#f4fbe9] border border-[#a3e635]/40 rounded-2xl p-6 shadow-sm mb-6">
       <h3 className="font-bold text-gray-900">
-        Crop & Livestock Revenue Trends
+        Monthly Income: {now.getFullYear()} vs {now.getFullYear() - 1}
       </h3>
+      <p className="text-xs text-gray-500 mt-0.5">Last 6 months</p>
 
       <div className="mt-6 flex gap-3">
-        {/* Y-axis labels */}
         <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
-          {Y_AXIS_CROP.map((label) => (
-            <span key={label}>{label}</span>
+          {yAxisLabels.map((label, i) => (
+            <span key={i}>{label}</span>
           ))}
         </div>
 
-        {/* Multi-series line chart */}
         <div className="flex-1 border-l border-gray-200 pl-4">
-          <svg
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            className="w-full h-48"
-            preserveAspectRatio="none"
-          >
-            {CROP_SERIES.map((series) => {
-              const points = toChartPoints(series.values);
-              const path = smoothPath(points);
-              return (
-                <g key={series.key}>
-                  <path
-                    d={path}
-                    fill="none"
-                    stroke={series.color}
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                  />
-                  {points.map((p, i) => (
-                    <circle
-                      key={i}
-                      cx={p.x}
-                      cy={p.y}
-                      r="3.5"
-                      fill={series.color}
-                    />
-                  ))}
-                </g>
-              );
-            })}
+          <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full h-48" preserveAspectRatio="none">
+            <path d={pathThisYear} fill="none" stroke="#2d4027" strokeOpacity="0.15" strokeWidth="6" strokeLinecap="round" />
+            <path d={pathLastYear} fill="none" stroke="#4b5563" strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round" />
+            <path d={pathThisYear} fill="none" stroke="#2d4027" strokeWidth="2.5" strokeLinecap="round" />
+            {pointsThisYear.map((p, i) => (
+              <circle key={i} cx={p.x} cy={p.y} r="4" fill="#2d4027" />
+            ))}
           </svg>
 
-          {/* X-axis season labels */}
           <div className="flex justify-between mt-2 px-1">
-            {CROP_SEASONS.map((s) => (
-              <span key={s} className="text-[11px] text-gray-500">
-                {s}
-              </span>
+            {months.map((m, i) => (
+              <span key={i} className="text-xs text-gray-500">{m.label}</span>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="mt-4 flex items-center justify-center flex-wrap gap-x-6 gap-y-2">
-        {CROP_SERIES.map((series) => (
+      <div className="mt-2 flex items-center justify-center gap-6">
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <span className="w-3 h-0.5 bg-[#2d4027] inline-block rounded" />
+          {now.getFullYear()}
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
           <span
-            key={series.key}
-            className="flex items-center gap-1.5 text-xs text-gray-600"
-          >
-            <span
-              className="w-2.5 h-2.5 rounded-full inline-block"
-              style={{ backgroundColor: series.color }}
-            />
-            {series.label}
-          </span>
-        ))}
+            className="w-3 h-0.5 bg-gray-500 inline-block rounded"
+            style={{ backgroundImage: "repeating-linear-gradient(to right, #6b7280 0, #6b7280 3px, transparent 3px, transparent 6px)" }}
+          />
+          {now.getFullYear() - 1}
+        </span>
+      </div>
+
+      <div className={`mt-4 border rounded-xl p-3 text-center ${growthPercent === null ? "bg-gray-50 border-gray-200" : growthPercent >= 0 ? "bg-[#e2f7e2] border-emerald-300" : "bg-red-50 border-red-200"}`}>
+        <p className={`font-medium text-sm ${growthPercent === null ? "text-gray-500" : growthPercent >= 0 ? "text-emerald-800" : "text-red-700"}`}>
+          {growthPercent === null
+            ? "No data from last year yet to compare against."
+            : `YoY Growth: ${growthPercent >= 0 ? "+" : ""}${growthPercent}% ${growthPercent >= 0 ? "— Positive growth compared to last year" : "— Down compared to last year"}`}
+        </p>
       </div>
     </div>
   );
 }
 
-function MonthlyYoYChart() {
-  const points2026 = toPoints(INCOME_2026);
-  const points2025 = toPoints(INCOME_2025);
-  const path2026 = smoothPath(points2026);
-  const path2025 = smoothPath(points2025);
-
+function FarmSetupPrompt() {
   return (
-    <div className="mt-6 bg-[#f4fbe9] border border-[#a3e635]/40 rounded-2xl p-6 shadow-sm mb-6">
-      <h3 className="font-bold text-gray-900">
-        Monthly Income: 2026 vs 2025
-      </h3>
-      <p className="text-xs text-gray-500 mt-0.5">Mar - Aug comparison</p>
-
-      <div className="mt-6 flex gap-3">
-        {/* Y-axis labels */}
-        <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
-          {Y_AXIS_YOY.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-
-        {/* Line chart */}
-        <div className="flex-1 border-l border-gray-200 pl-4">
-          <svg
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            className="w-full h-48"
-            preserveAspectRatio="none"
-          >
-            {/* Thin decorative baseline glow underneath the main 2026 line */}
-            <path
-              d={path2026}
-              fill="none"
-              stroke="#2d4027"
-              strokeOpacity="0.15"
-              strokeWidth="6"
-              strokeLinecap="round"
-            />
-
-            {/* 2025 dashed comparison line */}
-            <path
-              d={path2025}
-              fill="none"
-              stroke="#4b5563"
-              strokeWidth="2"
-              strokeDasharray="6 5"
-              strokeLinecap="round"
-            />
-
-            {/* 2026 solid line, on top */}
-            <path
-              d={path2026}
-              fill="none"
-              stroke="#2d4027"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-            />
-
-            {/* 2026 data point markers */}
-            {points2026.map((p, i) => (
-              <circle key={i} cx={p.x} cy={p.y} r="4" fill="#2d4027" />
-            ))}
-          </svg>
-
-          {/* X-axis month labels */}
-          <div className="flex justify-between mt-2 px-1">
-            {MONTHS.map((m) => (
-              <span key={m} className="text-xs text-gray-500">
-                {m}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="mt-2 flex items-center justify-center gap-6">
-        <span className="flex items-center gap-1.5 text-xs text-gray-500">
-          <span className="w-3 h-0.5 bg-[#2d4027] inline-block rounded" />
-          2026
-        </span>
-        <span className="flex items-center gap-1.5 text-xs text-gray-500">
-          <span
-            className="w-3 h-0.5 bg-gray-500 inline-block rounded"
-            style={{
-              backgroundImage:
-                "repeating-linear-gradient(to right, #6b7280 0, #6b7280 3px, transparent 3px, transparent 6px)",
-            }}
-          />
-          2025
-        </span>
-      </div>
-
-      {/* Summary callout banner */}
-      <div className="mt-4 bg-[#e2f7e2] border border-emerald-300 rounded-xl p-3 text-center">
-        <p className="text-emerald-800 font-medium text-sm">
-          Average YoY Growth: +21.4% — Positive growth compared to last year
-        </p>
-      </div>
+    <div className="bg-white border border-gray-100 rounded-2xl p-10 shadow-sm text-center max-w-md mx-auto">
+      <h3 className="font-bold text-gray-900 text-lg">No farm set up yet</h3>
+      <p className="mt-2 text-sm text-gray-500">
+        Trends are built from your real transactions, which need a farm first. Set one up from Income & Expenses to get started.
+      </p>
     </div>
   );
 }
@@ -360,32 +277,79 @@ function MonthlyYoYChart() {
 export default function TrendsComparisons() {
   const [primaryTab, setPrimaryTab] = useState("season");
   const [metricTab, setMetricTab] = useState("income");
-  const activeChart = CHART_CONFIG[metricTab];
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [hasFarm, setHasFarm] = useState(true);
+  const [records, setRecords] = useState([]);
 
-  // Bars grow from 0 whenever the selected metric (Income/Expenses/Profit)
-  // changes, so switching pills replays the animation on the new bars —
-  // same technique as the tab-switching charts elsewhere in the app.
-  const [barsGrown, setBarsGrown] = useState(false);
   useEffect(() => {
-    setBarsGrown(false);
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => setBarsGrown(true));
-      return () => cancelAnimationFrame(raf2);
-    });
-    return () => cancelAnimationFrame(raf1);
-  }, [metricTab]);
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setLoadError("");
+      try {
+        const farms = await authedRequest("/api/farms");
+        if (cancelled) return;
+        if (farms.length === 0) {
+          setHasFarm(false);
+          setLoading(false);
+          return;
+        }
+        // Fetches the last 2 years, so Year-on-Year has real history from
+        // both sides to compare, not just the current year.
+        const now = new Date();
+        const twoYearsAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+        const data = await authedRequest(
+          `/api/financial-records?farm=${farms[0]._id}&startDate=${twoYearsAgo.toISOString()}&endDate=${now.toISOString()}&limit=100`
+        );
+        if (cancelled) return;
+        setRecords(data);
+      } catch (err) {
+        if (!cancelled) setLoadError(err.message || "Failed to load your data.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Trends & Comparisons</h2>
+        <div className="mt-6 text-center text-gray-400 text-sm py-10">Loading…</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Trends & Comparisons</h2>
+        <div className="mt-6 bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-600 text-sm">{loadError}</div>
+      </div>
+    );
+  }
+
+  if (!hasFarm) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Trends & Comparisons</h2>
+        <FarmSetupPrompt />
+      </div>
+    );
+  }
+
+  const seasons = buildSeasons(records);
 
   return (
     <div>
-      {/* Header */}
-      <h2 className="text-3xl font-bold text-gray-900">
-        Financial Trends & Comparisons
-      </h2>
-      <p className="mt-1 text-gray-500">
-        Compare performance across seasons and periods
-      </p>
+      <h2 className="text-3xl font-bold text-gray-900">Financial Trends & Comparisons</h2>
+      <p className="mt-1 text-gray-500">Compare performance across seasons and periods</p>
 
-      {/* Primary view mode pills */}
       <div className="mt-5 flex flex-wrap gap-2">
         {PRIMARY_TABS.map((tab) => (
           <button
@@ -400,19 +364,13 @@ export default function TrendsComparisons() {
         ))}
       </div>
 
-      {/* Secondary metric pills — only shown for the Season-on-Season view */}
       {primaryTab === "season" && (
         <div className="mt-3 flex flex-wrap gap-2">
           {METRIC_TABS.map((tab) => {
             const isActive = metricTab === tab.key;
             let pillClass = "bg-[#dcfce7] text-emerald-800 font-semibold";
-            if (isActive && tab.key === "expenses") {
-              pillClass =
-                "bg-[#fce8e8] text-red-600 border border-red-300 font-semibold";
-            } else if (isActive && tab.key === "profit") {
-              pillClass =
-                "bg-[#fff7ed] text-amber-700 border border-amber-300 font-semibold";
-            }
+            if (isActive && tab.key === "expenses") pillClass = "bg-[#fce8e8] text-red-600 border border-red-300 font-semibold";
+            else if (isActive && tab.key === "profit") pillClass = "bg-[#fff7ed] text-amber-700 border border-amber-300 font-semibold";
             return (
               <button
                 key={tab.key}
@@ -426,98 +384,14 @@ export default function TrendsComparisons() {
         </div>
       )}
 
-      {/* Season-on-Season: bar chart + breakdown table */}
       {primaryTab === "season" && (
         <>
-          <div
-            className={`mt-6 border rounded-2xl p-6 shadow-sm mb-6 transition-colors ${activeChart.cardBg} ${activeChart.cardBorder}`}
-          >
-            <h3 className="font-bold text-gray-900">{activeChart.title}</h3>
-
-            <div className="mt-6 flex gap-3">
-              <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
-                {Y_AXIS_LABELS.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
-              </div>
-
-              <div className="flex-1 flex items-end h-48 border-l border-gray-200 pl-6">
-                {activeChart.bars.map((bar, i) => (
-                  <div
-                    key={i}
-                    className="flex flex-col items-center flex-1 px-2"
-                  >
-                    <div className="w-full flex items-end h-40">
-                      <div
-                        className={`w-full rounded-t transition-all duration-700 ease-out ${activeChart.barColor}`}
-                        style={{
-                          height: `${barsGrown ? (bar.value / CHART_MAX) * 100 : 0}%`,
-                          transitionDelay: `${i * 70}ms`,
-                        }}
-                        title={`₱${bar.value.toLocaleString()}`}
-                      />
-                    </div>
-                    <span className="mt-2 text-xs text-gray-500">
-                      {bar.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider">
-                  <th className="pb-2 font-semibold">Season</th>
-                  <th className="pb-2 font-semibold">Income</th>
-                  <th className="pb-2 font-semibold">Expense</th>
-                  <th className="pb-2 font-semibold">Profit</th>
-                  <th className="pb-2 font-semibold">Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {TABLE_ROWS.map((row, i) => (
-                  <tr key={i} className="border-t border-gray-50">
-                    <td className="py-3 text-gray-900 font-medium">
-                      {row.season}
-                    </td>
-                    <td
-                      className={`py-3 font-semibold ${
-                        row.income === "-"
-                          ? "text-gray-400"
-                          : "text-green-600"
-                      }`}
-                    >
-                      {row.income}
-                    </td>
-                    <td className="py-3 font-semibold text-red-500">
-                      {row.expense}
-                    </td>
-                    <td
-                      className={`py-3 font-semibold ${
-                        row.profitNegative ? "text-red-500" : "text-amber-700"
-                      }`}
-                    >
-                      {row.profit}
-                    </td>
-                    <td className="py-3 font-semibold text-green-600">
-                      {row.margin}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SeasonChart metricTab={metricTab} seasons={seasons} />
+          <SeasonTable seasons={seasons} />
         </>
       )}
 
-      {/* Year-on-Year: line chart + callout, no secondary pills, no table */}
-      {primaryTab === "yoy" && <MonthlyYoYChart />}
-
-      {/* Crop Revenue Trends: multi-series line chart, no secondary pills, no table */}
-      {primaryTab === "crop" && <CropRevenueChart />}
+      {primaryTab === "yoy" && <MonthlyYoYChart records={records} />}
     </div>
   );
 }

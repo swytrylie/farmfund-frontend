@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CreditCard, AlertTriangle, Calendar, Droplet, X } from "lucide-react";
-import { FILTERS } from "../../mocks/individual/alerts.mock";
+import { FILTERS } from "../../lib/alertEngine";
 
 const ICON_CONFIG = {
   loan: { Icon: CreditCard, bg: "bg-[#fce7f3]", color: "text-red-600" },
@@ -89,7 +89,7 @@ export default function Alerts({ alerts, onDismissAlert, onMarkAllAlertsRead }) 
           onClick={onMarkAllAlertsRead}
           className="text-gray-600 hover:text-gray-900 text-sm font-medium cursor-pointer"
         >
-          Mark as all read
+          Dismiss all
         </button>
       </div>
 

@@ -14,8 +14,8 @@ import {
   UserCog,
   LogOut,
 } from "lucide-react";
-import { getOrgDashboardOverview } from "../../mocks/organization/orgDashboard.mock";
-import { getPaymentReminders, sendReminder } from "../../mocks/organization/orgPaymentReminders.mock";
+import { authedRequest } from "../../api";
+import { fetchAllPages } from "../../lib/repaymentData";
 import BorrowerManagement from "./BorrowerManagement";
 import LoanRecords from "./LoanRecords";
 import RepaymentTracking from "./RepaymentTracking";
@@ -23,6 +23,7 @@ import PaymentHistory from "./PaymentHistory";
 import OverdueDebtMonitoring from "./OverdueDebtMonitoring";
 import PaymentReminders from "./PaymentReminders";
 import ReminderBell from "./ReminderBell";
+import OrgDashboardHome from "./OrgDashboardHome";
  import DebtReports from "./DebtReports";
  import FinancialAnalytics from "./FinancialAnalytics";
  import CooperativeProfile from "./CooperativeProfile";
@@ -70,9 +71,6 @@ const NAV_GROUPS = [
   },
 ];
 
-const CHART_MAX = 700000;
-const Y_AXIS_LABELS = ["₱700k", "₱525k", "₱350k", "₱175k", "₱0"];
-
 function SidebarNavItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
@@ -86,175 +84,6 @@ function SidebarNavItem({ icon: Icon, label, active, onClick }) {
       <Icon size={18} className="shrink-0" />
       {label}
     </button>
-  );
-}
-
-function KPICard({ label, value, subtext, subtextColor, borderColor }) {
-  return (
-    <div className={`bg-white rounded-xl p-5 shadow-sm border-l-4 ${borderColor}`}>
-      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-        {label}
-      </p>
-      <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
-      <p className={`mt-1 text-xs font-semibold ${subtextColor}`}>{subtext}</p>
-    </div>
-  );
-}
-
-function CollectionsTrendChart({ data }) {
-  const [hoveredMonth, setHoveredMonth] = useState(null);
-
-  // Bars grow from 0 on mount, same technique as the other dashboards' bar
-  // charts: start at 0, flip to true one frame later so the browser
-  // registers the 0-height state before the CSS transition animates it.
-  const [grown, setGrown] = useState(false);
-  useEffect(() => {
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => setGrown(true));
-      return () => cancelAnimationFrame(raf2);
-    });
-    return () => cancelAnimationFrame(raf1);
-  }, []);
-
-  return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900">Collections Trend</h3>
-        <span className="text-xs text-gray-400">Mar - Aug 2026</span>
-      </div>
-
-      <div className="mt-6 flex gap-3">
-        <div className="flex flex-col justify-between text-[11px] text-gray-400 h-52 pb-6">
-          {Y_AXIS_LABELS.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-
-        <div className="flex-1 flex items-end justify-between gap-3 h-52 border-l border-gray-100 pl-4 relative">
-          {data.map((d, i) => {
-            const isHovered = hoveredMonth === d.month;
-            return (
-              <div
-                key={d.month}
-                className="relative flex flex-col items-center flex-1 h-full justify-end"
-                onMouseEnter={() => setHoveredMonth(d.month)}
-                onMouseLeave={() => setHoveredMonth(null)}
-              >
-                {isHovered && (
-                  <div className="absolute bottom-full mb-2 bg-white border border-gray-200 rounded-xl shadow-md p-2.5 text-[11px] font-semibold space-y-1 whitespace-nowrap z-10">
-                    <p className="text-gray-900">
-                      Collected: ₱{d.collected.toLocaleString()}
-                    </p>
-                    <p className="text-gray-500">
-                      Target: ₱{d.target.toLocaleString()}
-                    </p>
-                  </div>
-                )}
-                <div
-                  className={`w-6 rounded-t transition-all duration-700 ease-out ${
-                    isHovered ? "bg-[#c9922a]" : "bg-[#d9a736]"
-                  }`}
-                  style={{
-                    height: `${grown ? (d.collected / CHART_MAX) * 100 : 0}%`,
-                    transitionDelay: `${i * 60}ms`,
-                  }}
-                />
-                <span className="mt-2 text-[11px] text-gray-400">{d.month}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NeedsAttentionCard({ item }) {
-  const isOverdue = item.tag === "Overdue";
-  return (
-    <div className="flex items-center justify-between border border-gray-100 rounded-lg p-3.5">
-      <div>
-        <p className="font-semibold text-gray-900 text-sm">{item.name}</p>
-        <p className="text-xs text-gray-400">{item.note}</p>
-      </div>
-      <span
-        className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
-          isOverdue
-            ? "border-red-300 text-red-600"
-            : "border-amber-300 text-amber-600"
-        }`}
-      >
-        {item.tag}
-      </span>
-    </div>
-  );
-}
-
-function OrgDashboardHome({ user, onNavigate }) {
-  const [overview, setOverview] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    getOrgDashboardOverview().then((data) => {
-      if (!cancelled) {
-        setOverview(data);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="mt-6 text-center text-gray-400 text-sm py-10">
-        Loading dashboard…
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-
-      <div className="mt-3">
-        <h2 className="text-3xl font-bold text-gray-900">
-          Hello, {user?.firstName}!
-        </h2>
-        <p className="mt-1 text-gray-500">
-          {user?.orgName || "Your cooperative"} · August 2026 overview
-        </p>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {overview.kpis.map((card) => (
-          <KPICard key={card.label} {...card} />
-        ))}
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <CollectionsTrendChart data={overview.collectionsTrend} />
-
-        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-gray-900">Needs Attention</h3>
-            <button
-              onClick={() => onNavigate?.("Borrower & Debt Management")}
-              className="text-sm font-semibold text-green-600 hover:underline"
-            >
-              Manage &gt;
-            </button>
-          </div>
-          <div className="mt-4 space-y-3">
-            {overview.needsAttention.map((item) => (
-              <NeedsAttentionCard key={item.name} item={item} />
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -274,45 +103,84 @@ function ComingSoonPlaceholder({ sectionName }) {
 export default function OrgDashboard({ user, onSignOut }) {
   const [activeItem, setActiveItem] = useState("Dashboard");
 
-  // Reminders now live here, once, shared by BOTH the bell popup and the
-  // full Payment Reminders page — sending a reminder from either place
-  // updates this one state, so both are always showing the exact same
-  // thing. Same pattern already used for alerts on the individual side.
+  // The signed-in person's own details. Held here, not just read from the
+  // `user` prop, so saving a new name in My Account updates the sidebar and
+  // the greeting straight away instead of only after a page refresh.
+  const [profile, setProfile] = useState(user);
+  function handleProfileUpdated(updated) {
+    setProfile((prev) => ({ ...prev, ...updated }));
+  }
+
+  // Who this account is within its cooperative. A fresh login or a restored
+  // session already carries both, but a session opened before those fields
+  // existed doesn't — in that case the server is asked once.
+  const [orgInfo, setOrgInfo] = useState({
+    cooperativeId: user?.cooperativeId || null,
+    orgRole: user?.orgRole || null,
+  });
+
+  // Reminders live here, once, shared by the bell popup, Overdue Debt
+  // Monitoring and the full Payment Reminders page — so sending one from
+  // anywhere updates the single list all three read from.
   const [reminders, setReminders] = useState([]);
+  const [remindersError, setRemindersError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    getPaymentReminders().then((result) => {
-      if (!cancelled) setReminders(result.reminders);
-    });
+    async function load() {
+      try {
+        let info = orgInfo;
+        if (!info.cooperativeId || !info.orgRole) {
+          const me = await authedRequest("/api/auth/me");
+          info = { cooperativeId: me.cooperativeId || null, orgRole: me.orgRole || null };
+          if (!cancelled) setOrgInfo(info);
+        }
+        if (info.cooperativeId) {
+          const list = await fetchAllPages(`/api/loan-reminders?cooperative=${info.cooperativeId}`);
+          if (!cancelled) setReminders(list);
+        }
+      } catch (err) {
+        if (!cancelled) setRemindersError(err.message || "Failed to load reminders.");
+      }
+    }
+    load();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function handleSendReminder(payload) {
-    await sendReminder();
-    // New reminders default to "pending" until real delivery confirmation
-    // exists on a backend — not marked "delivered" immediately, since that
-    // would be claiming something that hasn't actually happened yet.
-    const newReminder = {
-      id: `rem-${Date.now()}`,
-      borrower: payload.borrower,
-      type: payload.reminderType,
-      channel: payload.sendVia,
-      sent: new Date().toISOString().slice(0, 10),
-      status: "pending",
-      unread: true,
-    };
-    setReminders((prev) => [newReminder, ...prev]);
+  async function refreshReminders() {
+    if (!orgInfo.cooperativeId) return;
+    setReminders(await fetchAllPages(`/api/loan-reminders?cooperative=${orgInfo.cooperativeId}`));
+    setRemindersError("");
   }
 
-  function handleMarkAllRemindersRead() {
-    setReminders((prev) => prev.map((r) => ({ ...r, unread: false })));
+  // The one place a reminder is actually sent. The server emails the
+  // borrower and records the attempt either way — a failed send is saved
+  // as "failed", not lost — so the list is refreshed first. A refresh that
+  // itself fails must not make a successful send look like a failed one.
+  async function handleSendReminder({ loan, type, message }) {
+    const reminder = await authedRequest("/api/loan-reminders", {
+      method: "POST",
+      body: { loan, type, message },
+    });
+    try {
+      await refreshReminders();
+    } catch (err) {
+      setRemindersError(err.message || "The reminder was sent, but the list couldn't be refreshed.");
+    }
+    if (reminder.status === "failed") {
+      throw new Error("The email couldn't be sent. It was logged as failed — you can try again.");
+    }
+    return reminder;
   }
 
-  const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
-  const initials = `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase();
+  // Only a cooperative's owner or finance managers can send reminders; the
+  // server enforces it too, this just hides buttons that would be refused.
+  const canSendReminders = ["owner", "finance_manager"].includes(orgInfo.orgRole);
+
+  const fullName = `${profile?.firstName ?? ""} ${profile?.lastName ?? ""}`.trim();
+  const initials = `${profile?.firstName?.[0] ?? ""}${profile?.lastName?.[0] ?? ""}`.toUpperCase();
 
   // Single source of truth mapping each sidebar label to its page component
   // — same pattern used on the individual Dashboard, so every section's
@@ -392,17 +260,19 @@ export default function OrgDashboard({ user, onSignOut }) {
         <div className="absolute top-6 right-8 z-10">
           <ReminderBell
             reminders={reminders}
-            onMarkAllRead={handleMarkAllRemindersRead}
             onViewAll={() => setActiveItem("Payment Reminders")}
           />
         </div>
 
         {ActiveSectionComponent ? (
           <ActiveSectionComponent
-            user={user}
+            user={profile}
+            onProfileUpdated={handleProfileUpdated}
             onNavigate={setActiveItem}
             reminders={reminders}
             onSendReminder={handleSendReminder}
+            canSendReminders={canSendReminders}
+            remindersError={remindersError}
           />
         ) : (
           <ComingSoonPlaceholder sectionName={activeItem} />

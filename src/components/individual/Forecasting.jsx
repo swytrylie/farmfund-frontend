@@ -1,14 +1,12 @@
 import { useState, useEffect } from "react";
-import { Lightbulb, TrendingUp } from "lucide-react";
-import { getForecastData } from "../../mocks/individual/forecasting.mock";
+import { Info, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { authedRequest } from "../../api";
 
-const CHART_MAX = 340000;
-const Y_AXIS_LABELS = ["₱340k", "₱255k", "₱170k", "₱85k", "₱0"];
+const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+
 const CHART_W = 760;
 const CHART_H = 200;
 
-// Converts a set of points into a smooth SVG path using a Catmull-Rom-to-
-// Bezier spline, same technique used on the Trends & Comparisons charts.
 function smoothPath(points) {
   if (points.length < 2) return "";
   let d = `M ${points[0].x},${points[0].y}`;
@@ -26,116 +24,55 @@ function smoothPath(points) {
   return d;
 }
 
-function toPoints(values) {
-  return values.map((v, i) => ({
-    x: (i / (values.length - 1)) * CHART_W,
-    y: CHART_H - (v / CHART_MAX) * CHART_H,
-  }));
-}
+function ForecastChart({ pastMonths, projectedMonths, maxValue }) {
+  const allMonths = [...pastMonths, ...projectedMonths];
+  const toPoints = (values) => values.map((v, i) => ({ x: (i / (allMonths.length - 1)) * CHART_W, y: CHART_H - (v / maxValue) * CHART_H }));
 
-function ForecastChart({ data, projectedFromMonth }) {
-  const months = data.map((d) => d.month);
-  const incomePoints = toPoints(data.map((d) => d.income));
-  const expensePoints = toPoints(data.map((d) => d.expenses));
+  const incomeValues = [...pastMonths.map((m) => m.income), ...projectedMonths.map((m) => m.income)];
+  const expenseValues = [...pastMonths.map((m) => m.expenses), ...projectedMonths.map((m) => m.expenses)];
+  const incomePoints = toPoints(incomeValues);
+  const expensePoints = toPoints(expenseValues);
 
-  // Last actual month = the one right before the first projected month
-  const splitIndex = months.indexOf(projectedFromMonth) - 1;
-  const mayIndex = months.indexOf("May");
-
+  const splitIndex = pastMonths.length - 1;
   const solidIncome = smoothPath(incomePoints.slice(0, splitIndex + 1));
   const dashedIncome = smoothPath(incomePoints.slice(splitIndex));
   const solidExpenses = smoothPath(expensePoints.slice(0, splitIndex + 1));
   const dashedExpenses = smoothPath(expensePoints.slice(splitIndex));
 
-  const mayX = incomePoints[mayIndex]?.x;
-  const mayData = data[mayIndex];
+  const yAxisLabels = [0, 0.25, 0.5, 0.75, 1].map((f) => `₱${Math.round((maxValue * (1 - f)) / 1000)}k`);
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-6">
-      <h3 className="font-bold text-gray-900">
-        6-Month Forecast — Income &amp; Expenses
-      </h3>
+      <h3 className="font-bold text-gray-900">6-Month Outlook — Income &amp; Expenses</h3>
       <p className="text-xs text-gray-500 mt-0.5">
-        Dashed area shows projected September–December 2026
+        Dashed section is a simple projection — your last 3 real months' average, carried forward. Not AI, just an average.
       </p>
 
       <div className="mt-8 flex gap-3">
         <div className="flex flex-col justify-between text-[11px] text-gray-400 h-48">
-          {Y_AXIS_LABELS.map((label) => (
-            <span key={label}>{label}</span>
+          {yAxisLabels.map((label, i) => (
+            <span key={i}>{label}</span>
           ))}
         </div>
 
-        <div className="flex-1 border-l border-gray-200 pl-4 relative">
-          <svg
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            className="w-full h-48"
-            preserveAspectRatio="none"
-          >
-            {/* May vertical marker */}
-            {mayX !== undefined && (
-              <line
-                x1={mayX}
-                y1={0}
-                x2={mayX}
-                y2={CHART_H}
-                stroke="#93c5fd"
-                strokeWidth="1.5"
-                strokeDasharray="3 3"
-              />
-            )}
-
-            {/* Income line — solid (actual) then dashed (projected) */}
+        <div className="flex-1 border-l border-gray-200 pl-4">
+          <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full h-48" preserveAspectRatio="none">
             <path d={solidIncome} fill="none" stroke="#4f7331" strokeWidth="2.5" />
-            <path
-              d={dashedIncome}
-              fill="none"
-              stroke="#4f7331"
-              strokeWidth="2.5"
-              strokeDasharray="6 5"
-            />
-
-            {/* Expenses line — solid (actual) then dashed (projected) */}
+            <path d={dashedIncome} fill="none" stroke="#4f7331" strokeWidth="2.5" strokeDasharray="6 5" />
             <path d={solidExpenses} fill="none" stroke="#b83838" strokeWidth="2.5" />
-            <path
-              d={dashedExpenses}
-              fill="none"
-              stroke="#b83838"
-              strokeWidth="2.5"
-              strokeDasharray="6 5"
-            />
+            <path d={dashedExpenses} fill="none" stroke="#b83838" strokeWidth="2.5" strokeDasharray="6 5" />
           </svg>
 
-          {/* May tooltip, positioned above the marker */}
-          {mayX !== undefined && mayData && (
-            <div
-              className="absolute -top-4 -translate-y-full -translate-x-1/2 bg-white border border-gray-200 rounded-xl shadow-md p-2.5 text-[11px] font-semibold space-y-1 whitespace-nowrap z-10"
-              style={{ left: `${(mayX / CHART_W) * 100}%` }}
-            >
-              <span className="inline-block bg-blue-100 text-blue-700 rounded px-2 py-0.5 text-[10px] font-bold">
-                May
-              </span>
-              <p className="text-red-600">
-                Expenses: ₱{mayData.expenses.toLocaleString()}
-              </p>
-              <p className="text-green-700">
-                Income: ₱{mayData.income.toLocaleString()}
-              </p>
-            </div>
-          )}
-
-          {/* X-axis month labels */}
           <div className="flex justify-between mt-2 px-1">
-            {months.map((m) => (
-              <span key={m} className="text-[10px] text-gray-500">
-                {m}
+            {allMonths.map((m, i) => (
+              <span key={i} className={`text-[10px] ${i > splitIndex ? "text-gray-400" : "text-gray-500"}`}>
+                {m.label}
               </span>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Legend */}
       <div className="mt-4 flex items-center justify-center gap-6">
         <span className="flex items-center gap-1.5 text-xs text-gray-500">
           <span className="w-3 h-0.5 bg-[#4f7331] inline-block rounded" />
@@ -145,74 +82,156 @@ function ForecastChart({ data, projectedFromMonth }) {
           <span className="w-3 h-0.5 bg-[#b83838] inline-block rounded" />
           Expenses
         </span>
+        <span className="flex items-center gap-1.5 text-xs text-gray-400">
+          <span className="w-3 h-0.5 bg-gray-400 inline-block rounded" style={{ backgroundImage: "repeating-linear-gradient(to right, #9ca3af 0, #9ca3af 3px, transparent 3px, transparent 6px)" }} />
+          Projected
+        </span>
       </div>
     </div>
   );
 }
 
-function ScenarioCard({ scenario }) {
+function ScenarioCard({ label, dotColor, income, profit, profitColor, assumption }) {
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
       <div className="flex items-center gap-2">
-        <span className={`w-2.5 h-2.5 rounded-full ${scenario.dotColor}`} />
-        <span className="font-bold text-gray-900 text-sm">
-          {scenario.label}
-        </span>
+        <span className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
+        <span className="font-bold text-gray-900 text-sm">{label}</span>
       </div>
-
-      <p className="mt-3 text-xs text-gray-400">Projected Income</p>
-      <p className="text-sm font-bold text-gray-900">{scenario.income}</p>
-
-      <p className="mt-3 text-xs text-gray-400">Projected Profit</p>
-      <p className={`text-2xl font-bold ${scenario.profitColor}`}>
-        {scenario.profit}
-      </p>
-
-      <p className="mt-3 text-xs text-gray-500">{scenario.assumption}</p>
+      <p className="mt-3 text-xs text-gray-400">Projected Monthly Income</p>
+      <p className="text-sm font-bold text-gray-900">{peso(income)}</p>
+      <p className="mt-3 text-xs text-gray-400">Projected Monthly Profit</p>
+      <p className={`text-2xl font-bold ${profitColor}`}>{peso(profit)}</p>
+      <p className="mt-3 text-xs text-gray-500">{assumption}</p>
     </div>
   );
 }
 
-function ForecastAssumptions({ assumptions }) {
+function ForecastAssumptions({ avgIncome, avgExpenses, monthsUsed }) {
+  const rows = [
+    { label: "Average Monthly Income", value: peso(avgIncome), source: `Your last ${monthsUsed} months` },
+    { label: "Average Monthly Expenses", value: peso(avgExpenses), source: `Your last ${monthsUsed} months` },
+  ];
   return (
     <div className="bg-[#f8f8f3] border border-gray-200 rounded-2xl p-4 shadow-sm mb-6">
       <div className="flex items-center gap-2">
-        <Lightbulb size={18} className="text-amber-600" />
-        <h3 className="font-bold text-gray-900">Forecast Assumptions</h3>
+        <Info size={18} className="text-amber-600" />
+        <h3 className="font-bold text-gray-900">How this is calculated</h3>
       </div>
-
       <div className="mt-3 space-y-2.5">
-        {assumptions.map((a) => (
-          <div
-            key={a.label}
-            className="flex items-center justify-between text-sm"
-          >
+        {rows.map((a) => (
+          <div key={a.label} className="flex items-center justify-between text-sm">
             <span className="text-gray-700">{a.label}</span>
             <span className="text-right">
               <span className="font-bold text-gray-900">{a.value}</span>
-              <span className="block text-[11px] text-gray-400">
-                {a.source}
-              </span>
+              <span className="block text-[11px] text-gray-400">{a.source}</span>
             </span>
           </div>
         ))}
       </div>
+      <p className="mt-3 text-[11px] text-gray-400">
+        This is a simple average-based projection, not AI or machine learning — it assumes your recent pattern continues.
+      </p>
+    </div>
+  );
+}
+
+// Compares the average of the most recent 3 months against the 3 months
+// before that — a plain, honest trend observation computed directly from
+// real numbers, not an AI-generated insight.
+function TrendObservation({ records }) {
+  const now = new Date();
+  function sumIncomeInRange(monthsBack, monthsSpan) {
+    const start = new Date(now.getFullYear(), now.getMonth() - monthsBack - monthsSpan + 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth() - monthsBack + 1, 0, 23, 59, 59);
+    return records
+      .filter((r) => r.type === "income" && new Date(r.date) >= start && new Date(r.date) <= end)
+      .reduce((s, r) => s + r.amount, 0);
+  }
+  const recent3 = sumIncomeInRange(0, 3);
+  const prior3 = sumIncomeInRange(3, 3);
+
+  if (prior3 === 0) {
+    return (
+      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
+        <Info size={20} className="text-gray-400 shrink-0 mt-0.5" />
+        <p className="text-sm text-gray-500">Not enough history yet to compare recent trends.</p>
+      </div>
+    );
+  }
+
+  const changePercent = Math.round(((recent3 - prior3) / prior3) * 100);
+  const Icon = changePercent > 5 ? TrendingUp : changePercent < -5 ? TrendingDown : Minus;
+  const color = changePercent > 5 ? "text-green-700 bg-green-50 border-green-200" : changePercent < -5 ? "text-red-700 bg-red-50 border-red-200" : "text-gray-600 bg-gray-50 border-gray-200";
+
+  return (
+    <div className={`border rounded-2xl p-4 flex items-start gap-3 shadow-sm ${color}`}>
+      <Icon size={20} className="shrink-0 mt-0.5" />
+      <div>
+        <p className="font-bold">Income trend</p>
+        <p className="text-sm mt-0.5">
+          Your income over the last 3 months is {changePercent >= 0 ? "up" : "down"} {Math.abs(changePercent)}% compared to the 3 months before that.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function FarmSetupPrompt() {
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-10 shadow-sm text-center max-w-md mx-auto">
+      <h3 className="font-bold text-gray-900 text-lg">No farm set up yet</h3>
+      <p className="mt-2 text-sm text-gray-500">
+        A forecast needs real transaction history. Set up your farm from Income & Expenses to get started.
+      </p>
+    </div>
+  );
+}
+
+function NotEnoughDataPrompt() {
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-10 shadow-sm text-center max-w-md mx-auto">
+      <h3 className="font-bold text-gray-900 text-lg">Not enough history yet</h3>
+      <p className="mt-2 text-sm text-gray-500">
+        A projection needs at least one real month of transactions to work from. Log some income and expenses in Income & Expenses, then check back here.
+      </p>
     </div>
   );
 }
 
 export default function Forecasting() {
-  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [hasFarm, setHasFarm] = useState(true);
+  const [records, setRecords] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
-    getForecastData().then((result) => {
-      if (!cancelled) {
-        setData(result);
-        setLoading(false);
+    async function load() {
+      setLoading(true);
+      setLoadError("");
+      try {
+        const farms = await authedRequest("/api/farms");
+        if (cancelled) return;
+        if (farms.length === 0) {
+          setHasFarm(false);
+          setLoading(false);
+          return;
+        }
+        const now = new Date();
+        const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+        const data = await authedRequest(
+          `/api/financial-records?farm=${farms[0]._id}&startDate=${sixMonthsAgo.toISOString()}&endDate=${now.toISOString()}&limit=100`
+        );
+        if (cancelled) return;
+        setRecords(data);
+      } catch (err) {
+        if (!cancelled) setLoadError(err.message || "Failed to load your data.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    });
+    }
+    load();
     return () => {
       cancelled = true;
     };
@@ -221,50 +240,98 @@ export default function Forecasting() {
   if (loading) {
     return (
       <div>
-        <h2 className="text-3xl font-bold text-gray-900">
-          Financial Forecasting
-        </h2>
-        <div className="mt-6 text-center text-gray-400 text-sm py-10">
-          Loading forecast…
-        </div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Forecasting</h2>
+        <div className="mt-6 text-center text-gray-400 text-sm py-10">Loading…</div>
       </div>
     );
   }
 
+  if (loadError) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Forecasting</h2>
+        <div className="mt-6 bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-600 text-sm">{loadError}</div>
+      </div>
+    );
+  }
+
+  if (!hasFarm) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Forecasting</h2>
+        <FarmSetupPrompt />
+      </div>
+    );
+  }
+
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString("en-US", { month: "short" }) });
+  }
+  const pastMonths = months.map(({ year, month, label }) => {
+    let income = 0, expenses = 0;
+    for (const r of records) {
+      const d = new Date(r.date);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        if (r.type === "income") income += r.amount;
+        else expenses += r.amount;
+      }
+    }
+    return { label, income, expenses };
+  });
+
+  const monthsWithData = pastMonths.filter((m) => m.income > 0 || m.expenses > 0).length;
+  if (monthsWithData === 0) {
+    return (
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">Financial Forecasting</h2>
+        <NotEnoughDataPrompt />
+      </div>
+    );
+  }
+
+  // Simple moving average of the last 3 real months (or fewer, if that's
+  // all that exists) — carried forward as the projection. Plain
+  // arithmetic, not AI.
+  const recentMonths = pastMonths.slice(-3).filter((m) => m.income > 0 || m.expenses > 0);
+  const divisor = Math.max(1, recentMonths.length);
+  const avgIncome = recentMonths.reduce((s, m) => s + m.income, 0) / divisor;
+  const avgExpenses = recentMonths.reduce((s, m) => s + m.expenses, 0) / divisor;
+
+  const projectedMonths = [1, 2, 3].map((i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    return { label: d.toLocaleDateString("en-US", { month: "short" }), income: avgIncome, expenses: avgExpenses };
+  });
+
+  const maxValue = Math.max(10000, ...pastMonths.map((m) => Math.max(m.income, m.expenses)), avgIncome, avgExpenses);
+
+  const scenarios = [
+    { key: "optimistic", label: "Optimistic", dotColor: "bg-green-600", income: avgIncome * 1.15, profit: avgIncome * 1.15 - avgExpenses * 0.95, profitColor: "text-green-700", assumption: "15% above your recent average income" },
+    { key: "base", label: "Base Case", dotColor: "bg-amber-500", income: avgIncome, profit: avgIncome - avgExpenses, profitColor: "text-amber-600", assumption: "Your recent average continues unchanged" },
+    { key: "pessimistic", label: "Pessimistic", dotColor: "bg-red-600", income: avgIncome * 0.85, profit: avgIncome * 0.85 - avgExpenses * 1.05, profitColor: "text-red-600", assumption: "15% below your recent average income" },
+  ];
+
   return (
     <div>
-      <h2 className="text-3xl font-bold text-gray-900">
-        Financial Forecasting
-      </h2>
-      <p className="mt-1 text-gray-500">
-        AI-powered projections based on your farm history
-      </p>
+      <h2 className="text-3xl font-bold text-gray-900">Financial Forecasting</h2>
+      <p className="mt-1 text-gray-500">A simple projection based on your own recent transaction history</p>
 
       <div className="mt-6">
-        <ForecastChart
-          data={data.chart}
-          projectedFromMonth={data.projectedFromMonth}
-        />
+        <ForecastChart pastMonths={pastMonths} projectedMonths={projectedMonths} maxValue={maxValue} />
       </div>
 
-      <h3 className="font-bold text-gray-900 mb-3">
-        Scenario Analysis - Dec 2026
-      </h3>
+      <h3 className="font-bold text-gray-900 mb-3">Scenario Comparison</h3>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {data.scenarios.map((s) => (
-          <ScenarioCard key={s.key} scenario={s} />
+        {scenarios.map(({ key, ...s }) => (
+          <ScenarioCard key={key} {...s} />
         ))}
       </div>
 
-      <ForecastAssumptions assumptions={data.assumptions} />
+      <ForecastAssumptions avgIncome={avgIncome} avgExpenses={avgExpenses} monthsUsed={recentMonths.length} />
 
-      <div className="bg-[#fefce8] border border-amber-200 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
-        <TrendingUp size={20} className="text-amber-600 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-bold text-amber-800">AI Forecast Insight</p>
-          <p className="text-sm text-amber-900 mt-0.5">{data.aiInsight}</p>
-        </div>
-      </div>
+      <TrendObservation records={records} />
     </div>
   );
 }

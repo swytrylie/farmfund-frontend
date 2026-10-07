@@ -509,7 +509,7 @@ export default function AdminDashboard({ user, onSignOut }) {
             <p className="text-white font-bold text-sm truncate">
               {fullName || "Admin User"}
             </p>
-            <p className="text-white/60 text-xs truncate">{user?.role || "System Admin"}</p>
+            <p className="text-white/60 text-xs truncate">{user?.role === "admin" ? "System Admin" : user?.role || "System Admin"}</p>
           </div>
         </div>
 
