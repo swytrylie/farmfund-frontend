@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Copy, Check } from "lucide-react";
 import { authedRequest } from "../../api";
 
@@ -18,10 +18,9 @@ function Toast({ message, onClose }) {
   );
 }
 
-// There's no real email-sending service set up yet, so the invite link
-// is shown here directly for the owner to copy and share themselves
-// (text, email, however) — rather than claiming it was auto-sent when it
-// genuinely wasn't.
+// The invite is emailed automatically. The link is also shown here once,
+// right after it's created, in case the email is slow or lands in spam and
+// the owner wants to send it themselves.
 function InviteLinkModal({ inviteLink, onClose }) {
   const [copied, setCopied] = useState(false);
 
@@ -41,7 +40,7 @@ function InviteLinkModal({ inviteLink, onClose }) {
           </button>
         </div>
         <p className="text-sm text-gray-500 mt-2">
-          Copy this link and send it to them yourself — there's no automatic email delivery set up yet. The link expires in 7 days.
+          We've emailed this invite. If it doesn't arrive, you can copy this link and send it to them yourself. It expires in 7 days and is only shown now.
         </p>
         <div className="mt-4 flex items-center gap-2">
           <input
@@ -169,7 +168,63 @@ function InviteStaffModal({ existingEmails, onSend, onCancel }) {
   );
 }
 
-function MemberRow({ member }) {
+function RemoveMemberModal({ member, onConfirm, onCancel }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  // A ref, not just state: two quick clicks land before React re-renders, and
+  // state alone would let both through (deleting twice / emailing twice).
+  const busy = useRef(false);
+  const name = member.user ? `${member.user.firstName} ${member.user.lastName}` : "this person";
+
+  async function handleConfirm() {
+    if (busy.current) return;
+    busy.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onConfirm(member);
+    } catch (err) {
+      setError(err.message || "Something went wrong. Please try again.");
+      setSaving(false);
+      busy.current = false;
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={saving ? undefined : onCancel}>
+      <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <h3 className="text-xl font-bold text-gray-900">Remove {name}?</h3>
+          <button onClick={onCancel} disabled={saving} className="text-gray-400 hover:text-gray-600 disabled:opacity-50" aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+        <p className="text-sm text-gray-600 mt-3">
+          This removes <strong>{name}</strong> ({ROLE_LABEL[member.role]}) from your cooperative and <strong>permanently deletes their FarmFund account</strong>.
+          They will be emailed to let them know.
+        </p>
+        <p className="text-sm text-gray-500 mt-2">
+          Payments and reminders they recorded stay in your records. The same email can sign up again or be invited again later. This can't be undone.
+        </p>
+        {error && <p className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button onClick={onCancel} disabled={saving} className="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={saving}
+            className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-5 py-2.5 transition-colors disabled:opacity-60"
+          >
+            {saving ? "Removing…" : "Remove and delete account"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemberRow({ member, canManage, onRemove }) {
   const name = member.user ? `${member.user.firstName} ${member.user.lastName}` : "Unknown";
   return (
     <tr className="border-t border-gray-50">
@@ -181,11 +236,20 @@ function MemberRow({ member }) {
       <td className="py-3">
         <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">Active</span>
       </td>
+      {canManage && (
+        <td className="py-3 text-right">
+          {member.role !== "owner" && (
+            <button onClick={() => onRemove(member)} className="text-xs text-red-500 hover:underline">
+              Remove
+            </button>
+          )}
+        </td>
+      )}
     </tr>
   );
 }
 
-function PendingInviteRow({ invite, onRevoke, onShowLink }) {
+function PendingInviteRow({ invite, onRevoke, canManage }) {
   const isExpired = new Date(invite.expiresAt) < new Date();
   return (
     <tr className="border-t border-gray-50">
@@ -201,14 +265,13 @@ function PendingInviteRow({ invite, onRevoke, onShowLink }) {
           {isExpired ? "Expired" : "Pending"}
         </span>
       </td>
-      <td className="py-3 text-right">
-        <button onClick={() => onShowLink(invite)} className="text-xs text-[#4f7331] hover:underline mr-3">
-          Copy link
-        </button>
-        <button onClick={() => onRevoke(invite)} className="text-xs text-red-500 hover:underline">
-          Revoke
-        </button>
-      </td>
+      {canManage && (
+        <td className="py-3 text-right">
+          <button onClick={() => onRevoke(invite)} className="text-xs text-red-500 hover:underline">
+            Revoke
+          </button>
+        </td>
+      )}
     </tr>
   );
 }
@@ -222,6 +285,10 @@ export default function TeamInvitations() {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [activeInviteLink, setActiveInviteLink] = useState(null);
   const [toastMessage, setToastMessage] = useState("");
+  // Only the cooperative's owner can invite or revoke. The server enforces
+  // this too; this just hides buttons that would be refused anyway.
+  const [canManage, setCanManage] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState(null);
 
   async function loadAll(coopId) {
     const [membersData, invitesData] = await Promise.all([
@@ -246,6 +313,7 @@ export default function TeamInvitations() {
           return;
         }
         setCooperativeId(me.cooperativeId);
+        setCanManage(me.orgRole === "owner");
         await loadAll(me.cooperativeId);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || "Failed to load your data.");
@@ -275,8 +343,23 @@ export default function TeamInvitations() {
     setToastMessage(`Invite to ${invite.email} revoked`);
   }
 
-  function handleShowLink(invite) {
-    setActiveInviteLink(`${window.location.origin}/accept-invite?token=${invite.token}`);
+  async function handleRemoveMember(member) {
+    let result;
+    try {
+      result = await authedRequest(`/api/cooperative-members/${member._id}`, { method: "DELETE" });
+    } catch (err) {
+      // Someone else may have just removed them: refresh so the list is true.
+      if (err.status === 404 || err.status === 409) loadAll(cooperativeId).catch(() => {});
+      throw err;
+    }
+    const name = member.user ? `${member.user.firstName} ${member.user.lastName}` : "The member";
+    setMembers((prev) => prev.filter((m) => m._id !== member._id));
+    setMemberToRemove(null);
+    setToastMessage(
+      result && result.emailSent === false
+        ? `${name} was removed and their account deleted, but the email couldn't be sent`
+        : `${name} was removed and notified by email`
+    );
   }
 
   if (loading) {
@@ -306,12 +389,14 @@ export default function TeamInvitations() {
           <h2 className="text-3xl font-bold text-gray-900">Team & Invitations</h2>
           <p className="mt-1 text-gray-500">Manage who has access to your cooperative</p>
         </div>
-        <button
-          onClick={() => setIsInviteModalOpen(true)}
-          className="mt-12 bg-[#3f6238] hover:bg-[#34512e] text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors"
-        >
-          Invite Staff
-        </button>
+        {canManage && (
+          <button
+            onClick={() => setIsInviteModalOpen(true)}
+            className="mt-12 bg-[#3f6238] hover:bg-[#34512e] text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors"
+          >
+            Invite Staff
+          </button>
+        )}
       </div>
 
       <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-5 shadow-sm mb-6">
@@ -322,11 +407,12 @@ export default function TeamInvitations() {
               <th className="pb-2 font-semibold">Name</th>
               <th className="pb-2 font-semibold">Role</th>
               <th className="pb-2 font-semibold">Status</th>
+              {canManage && <th className="pb-2 font-semibold text-right">Actions</th>}
             </tr>
           </thead>
           <tbody>
             {members.map((m) => (
-              <MemberRow key={m._id} member={m} />
+              <MemberRow key={m._id} member={m} canManage={canManage} onRemove={setMemberToRemove} />
             ))}
           </tbody>
         </table>
@@ -343,12 +429,12 @@ export default function TeamInvitations() {
                 <th className="pb-2 font-semibold">Email</th>
                 <th className="pb-2 font-semibold">Role</th>
                 <th className="pb-2 font-semibold">Status</th>
-                <th className="pb-2 font-semibold text-right">Actions</th>
+                {canManage && <th className="pb-2 font-semibold text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {invites.map((i) => (
-                <PendingInviteRow key={i._id} invite={i} onRevoke={handleRevoke} onShowLink={handleShowLink} />
+                <PendingInviteRow key={i._id} invite={i} onRevoke={handleRevoke} canManage={canManage} />
               ))}
             </tbody>
           </table>
@@ -357,6 +443,10 @@ export default function TeamInvitations() {
 
       {isInviteModalOpen && (
         <InviteStaffModal existingEmails={existingEmails} onSend={handleSendInvite} onCancel={() => setIsInviteModalOpen(false)} />
+      )}
+
+      {memberToRemove && (
+        <RemoveMemberModal member={memberToRemove} onConfirm={handleRemoveMember} onCancel={() => setMemberToRemove(null)} />
       )}
 
       {activeInviteLink && <InviteLinkModal inviteLink={activeInviteLink} onClose={() => setActiveInviteLink(null)} />}

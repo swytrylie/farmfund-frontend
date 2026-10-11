@@ -6,35 +6,47 @@ import {
   Pencil,
   Slash,
   Trash2,
-  ChevronDown,
+  Mail,
   X,
   CheckCircle2,
+  Info,
 } from "lucide-react";
 import {
-  getUsers,
-  suspendUser,
-  activateUser,
-  deleteUser,
-  updateUser,
-  createUser,
-  TYPE_FILTERS,
-  USER_TYPE_OPTIONS,
-} from "../../mocks/admin/adminUsers.mock";
+  useAdminUserList,
+  suspendAdminUser,
+  reactivateAdminUser,
+  updateAdminUser,
+  deleteAdminUser,
+  sendAdminPasswordReset,
+  messageFrom,
+  formatDate,
+  formatDateTime,
+} from "../../lib/adminUsers";
 
-const NAME_REGEX = /^[a-zA-Z\s'-]+$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const TYPE_FILTERS = [
+  { label: "All", value: "all" },
+  { label: "Farm Owners", value: "individual" },
+  { label: "Cooperative Owners", value: "owner" },
+  { label: "Financial Managers", value: "finance_manager" },
+  { label: "Members", value: "member" },
+];
+
+// The server calls a regular account "Individual"; in this app those people are farm owners.
+const typeText = (u) => (u.type === "individual" ? "Farm Owner" : u.typeLabel);
+
 const TYPE_BADGE = {
-  Farmer: "bg-[#e8f5e9] text-[#2e7d32]",
-  "Cooperative Owner": "bg-[#fff8e1] text-[#b8860b]",
-  "Financial Manager": "bg-[#e8eaf6] text-[#3f51b5]",
-  "Individual Lender": "bg-[#ede7f6] text-[#6a1b9a]",
+  individual: "bg-[#e8f5e9] text-[#2e7d32]",
+  owner: "bg-[#fff8e1] text-[#b8860b]",
+  finance_manager: "bg-[#e8eaf6] text-[#3f51b5]",
+  member: "bg-[#ede7f6] text-[#6a1b9a]",
 };
 
-function TypeBadge({ type }) {
+function TypeBadge({ type, label }) {
   return (
     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${TYPE_BADGE[type] ?? "bg-gray-100 text-gray-600"}`}>
-      {type}
+      {label}
     </span>
   );
 }
@@ -54,21 +66,25 @@ function StatusBadge({ status }) {
   );
 }
 
-function Toast({ message, onClose }) {
+function Toast({ message, tone = "success", onClose }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(onClose, tone === "error" ? 6000 : 3000);
     return () => clearTimeout(timer);
-  }, [onClose]);
+  }, [onClose, tone]);
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#2d4027] text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium">
-      <CheckCircle2 size={16} />
+    <div
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium ${
+        tone === "error" ? "bg-[#c24141]" : "bg-[#2d4027]"
+      }`}
+    >
+      {tone === "error" ? <Info size={16} /> : <CheckCircle2 size={16} />}
       {message}
     </div>
   );
 }
 
-function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onDeleteRequest }) {
+function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onResetRequest, onDeleteRequest }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -82,63 +98,59 @@ function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onDe
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const item = "w-full flex items-center gap-2.5 px-4 py-2 text-sm text-left";
+
   return (
     <div className="relative" ref={containerRef}>
-      <button onClick={() => setIsOpen((o) => !o)} aria-label="Actions">
+      <button onClick={() => setIsOpen((o) => !o)} aria-label={`Actions for ${user.name}`}>
         <MoreVertical className="w-5 h-5 text-gray-500 cursor-pointer" />
       </button>
 
       {isOpen && (
-        <div className="absolute top-7 right-0 bg-white border border-gray-100 rounded-2xl shadow-xl py-2 w-48 z-50">
+        <div className="absolute top-7 right-0 bg-white border border-gray-100 rounded-2xl shadow-xl py-2 w-52 z-50">
           <button
-            onClick={() => {
-              setIsOpen(false);
-              onView(user);
-            }}
-            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-gray-50 text-gray-700 text-left"
+            onClick={() => { setIsOpen(false); onView(user); }}
+            className={`${item} hover:bg-gray-50 text-gray-700`}
           >
             <Eye className="w-4 h-4 text-gray-500" />
             View account
           </button>
           <button
-            onClick={() => {
-              setIsOpen(false);
-              onUpdate(user);
-            }}
-            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-gray-50 text-gray-700 text-left"
+            onClick={() => { setIsOpen(false); onUpdate(user); }}
+            className={`${item} hover:bg-gray-50 text-gray-700`}
           >
             <Pencil className="w-4 h-4 text-gray-500" />
             Update details
           </button>
           {user.status === "active" ? (
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                onSuspendRequest(user);
-              }}
-              className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-amber-50 text-amber-700 text-left"
-            >
-              <Slash className="w-4 h-4 text-amber-500" />
-              Suspend
-            </button>
+            <>
+              <button
+                onClick={() => { setIsOpen(false); onResetRequest(user); }}
+                className={`${item} hover:bg-gray-50 text-gray-700`}
+              >
+                <Mail className="w-4 h-4 text-gray-500" />
+                Send password reset
+              </button>
+              <button
+                onClick={() => { setIsOpen(false); onSuspendRequest(user); }}
+                className={`${item} hover:bg-amber-50 text-amber-700`}
+              >
+                <Slash className="w-4 h-4 text-amber-500" />
+                Suspend
+              </button>
+            </>
           ) : (
             <button
-              onClick={() => {
-                setIsOpen(false);
-                onActivate(user);
-              }}
-              className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-emerald-50 text-emerald-700 text-left"
+              onClick={() => { setIsOpen(false); onActivate(user); }}
+              className={`${item} hover:bg-emerald-50 text-emerald-700`}
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              Activate
+              Reactivate
             </button>
           )}
           <button
-            onClick={() => {
-              setIsOpen(false);
-              onDeleteRequest(user);
-            }}
-            className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-red-50 text-red-600 text-left"
+            onClick={() => { setIsOpen(false); onDeleteRequest(user); }}
+            className={`${item} hover:bg-red-50 text-red-600`}
           >
             <Trash2 className="w-4 h-4 text-red-500" />
             Delete
@@ -149,77 +161,90 @@ function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onDe
   );
 }
 
-function ViewAccountModal({ user, onClose }) {
-  const fields = [
-    { label: "Full Name", value: user.name },
-    { label: "Email", value: user.email },
-    { label: "User Type", value: user.type },
-    { label: "Status", value: user.status === "active" ? "Active" : "Suspended" },
-    { label: "Cooperative / Farm", value: user.org },
-    { label: "Joined", value: user.joined },
-  ];
-
+function ModalShell({ onClose, children, width = "max-w-md" }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl"
+        className={`bg-white rounded-3xl p-8 ${width} w-full shadow-2xl max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-2xl font-bold text-gray-900">Account Details</h3>
-            <p className="text-xs text-gray-500 mb-6">
-              Account and platform metadata only — no financial content is
-              shown here.
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {fields.map((f) => (
-            <div key={f.label}>
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                {f.label}
-              </p>
-              <div className="bg-[#f4f4f4] rounded-xl px-4 py-3 text-sm font-medium text-gray-800">
-                {f.value}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="bg-[#f8f9f8] border border-gray-200 rounded-2xl p-4 mt-4">
-          <p className="text-xs font-bold text-gray-800 mb-2">Recent Activity</p>
-          <p className="text-xs text-gray-500">Last login: Aug 31, 2026, 8:14 AM</p>
-          <p className="text-xs text-gray-500">Account created: {user.joined}</p>
-        </div>
-
-        <div className="flex items-center justify-end mt-6">
-          <button
-            onClick={onClose}
-            className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-6 py-2 rounded-xl text-sm font-medium transition-colors"
-          >
-            Close
-          </button>
-        </div>
+        {children}
       </div>
     </div>
   );
 }
 
-function UpdateDetailsModal({ user, onSave, onClose }) {
-  const [form, setForm] = useState({
-    name: user.name,
-    email: user.email,
-    type: user.type,
-    org: user.org,
-  });
+function ViewAccountModal({ user, onClose }) {
+  const fields = [
+    { label: "Full Name", value: user.name },
+    { label: "Email", value: user.email },
+    { label: "User Type", value: typeText(user) },
+    { label: "Status", value: user.status === "active" ? "Active" : "Suspended" },
+    { label: "Cooperative", value: user.org || "—" },
+    { label: "Joined", value: formatDate(user.joined) },
+  ];
+
+  return (
+    <ModalShell onClose={onClose} width="max-w-lg">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900">Account Details</h3>
+          <p className="text-xs text-gray-500 mb-6">
+            Account and platform metadata only — no financial content is shown here.
+          </p>
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+          <X size={20} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {fields.map((f) => (
+          <div key={f.label}>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">{f.label}</p>
+            <div className="bg-[#f4f4f4] rounded-xl px-4 py-3 text-sm font-medium text-gray-800 break-words">
+              {f.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-[#f8f9f8] border border-gray-200 rounded-2xl p-4 mt-4">
+        <p className="text-xs font-bold text-gray-800 mb-2">Recent Activity</p>
+        <p className="text-xs text-gray-500">
+          Last login: {user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "Never"}
+        </p>
+        <p className="text-xs text-gray-500">Account created: {formatDateTime(user.joined)}</p>
+      </div>
+
+      {user.status === "suspended" && (
+        <div className="bg-[#fff8e1] border border-[#f1d98a] rounded-2xl p-4 mt-4">
+          <p className="text-xs font-bold text-[#8c6a00] mb-2">Suspension</p>
+          <p className="text-xs text-gray-700">Reason: {user.statusReason || "—"}</p>
+          <p className="text-xs text-gray-500">
+            By {user.statusChangedBy || "—"}
+            {user.statusChangedAt ? ` on ${formatDateTime(user.statusChangedAt)}` : ""}
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-center justify-end mt-6">
+        <button
+          onClick={onClose}
+          className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-6 py-2 rounded-xl text-sm font-medium transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function UpdateDetailsModal({ user, busy, error, onSave, onClose }) {
+  const [form, setForm] = useState({ firstName: user.firstName, lastName: user.lastName, email: user.email });
   const [errors, setErrors] = useState({});
 
   function update(field, value) {
@@ -227,486 +252,288 @@ function UpdateDetailsModal({ user, onSave, onClose }) {
     setErrors((prev) => ({ ...prev, [field]: undefined }));
   }
 
+  function nameProblem(value, label) {
+    const v = value.trim();
+    if (!v) return `${label} is required.`;
+    if (v.length > 50) return `${label} must be 50 characters or fewer.`;
+    if (/[<>]/.test(v)) return `${label} can't contain < or >.`;
+    return null;
+  }
+
+  const emailChanging = form.email.trim().toLowerCase() !== user.email.toLowerCase();
+
   function handleSave() {
+    if (busy) return;
     const newErrors = {
-      name: !form.name.trim()
-        ? "Full name is required."
-        : form.name.trim().length < 2
-        ? "Name must be at least 2 characters."
-        : !NAME_REGEX.test(form.name)
-        ? "Only letters, spaces, hyphens, and apostrophes allowed."
-        : null,
+      firstName: nameProblem(form.firstName, "First name"),
+      lastName: nameProblem(form.lastName, "Last name"),
       email: !form.email.trim()
         ? "Email is required."
-        : !EMAIL_REGEX.test(form.email)
+        : !EMAIL_REGEX.test(form.email.trim())
         ? "Enter a valid email address."
         : null,
     };
     setErrors(newErrors);
     if (Object.values(newErrors).some(Boolean)) return;
 
-    onSave({ ...user, ...form, name: form.name.trim(), email: form.email.trim().toLowerCase() });
+    const changes = {};
+    if (form.firstName.trim() !== user.firstName) changes.firstName = form.firstName.trim();
+    if (form.lastName.trim() !== user.lastName) changes.lastName = form.lastName.trim();
+    if (emailChanging) changes.email = form.email.trim();
+    onSave(changes);
   }
 
+  const inputClass = (hasError) =>
+    `bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
+      hasError ? "border-red-400" : "border-gray-200"
+    }`;
+  const labelClass = "text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block";
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between">
+    <ModalShell onClose={busy ? () => {} : onClose} width="max-w-lg">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900 mb-1">Update User Details</h3>
+          <p className="text-xs text-gray-500 mb-6">Changes are recorded in the Audit Logs under your admin account.</p>
+        </div>
+        <button onClick={onClose} disabled={busy} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+          <X size={20} />
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">Update User Details</h3>
-            <p className="text-xs text-gray-500 mb-6">
-              Changes here are logged to Audit Logs under your admin account.
+            <label className={labelClass} htmlFor="um-first">First name</label>
+            <input id="um-first" type="text" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} className={inputClass(errors.firstName)} />
+            {errors.firstName && <p className="mt-1 text-xs text-red-500">{errors.firstName}</p>}
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="um-last">Last name</label>
+            <input id="um-last" type="text" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} className={inputClass(errors.lastName)} />
+            {errors.lastName && <p className="mt-1 text-xs text-red-500">{errors.lastName}</p>}
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass} htmlFor="um-email">Email</label>
+          <input id="um-email" type="email" value={form.email} onChange={(e) => update("email", e.target.value)} className={inputClass(errors.email)} />
+          {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
+          {emailChanging && !errors.email && (
+            <p className="mt-1 text-xs text-[#8c6a00]">
+              Changing the email signs this person out everywhere and notifies both the old and new address.
             </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => update("name", e.target.value.replace(/[^a-zA-Z\s'-]/g, ""))}
-              className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-                errors.name ? "border-red-400" : "border-gray-200"
-              }`}
-            />
-            {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              Email
-            </label>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => update("email", e.target.value)}
-              className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-                errors.email ? "border-red-400" : "border-gray-200"
-              }`}
-            />
-            {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              User Type
-            </label>
-            <div className="relative">
-              <select
-                value={form.type}
-                onChange={(e) => update("type", e.target.value)}
-                className="appearance-none bg-[#f4f4f4] border border-gray-200 rounded-xl px-4 py-3 pr-10 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all"
-              >
-                {USER_TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-5 h-5 text-gray-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              Cooperative / Farm
-            </label>
-            <input
-              type="text"
-              value={form.org}
-              onChange={(e) => update("org", e.target.value)}
-              className="bg-[#f4f4f4] border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors"
-          >
-            Close
-          </button>
-          <button
-            onClick={handleSave}
-            className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors"
-          >
-            Save changes
-          </button>
+          )}
         </div>
       </div>
-    </div>
+
+      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+
+      <div className="flex items-center justify-end gap-3 mt-6">
+        <button onClick={onClose} disabled={busy} className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50">
+          Close
+        </button>
+        <button onClick={handleSave} disabled={busy} className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-60">
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
-function SuspendAccountModal({ user, onConfirm, onClose }) {
+function SuspendAccountModal({ user, busy, error: serverError, onConfirm, onClose }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
 
   function handleConfirm() {
-    if (!reason.trim()) {
-      setError("A reason is required to suspend this account.");
+    if (busy) return;
+    const r = reason.trim();
+    if (r.length < 3) {
+      setError("Give a reason of at least 3 characters.");
       return;
     }
-    onConfirm(user, reason.trim());
+    if (r.length > 300) {
+      setError("The reason must be 300 characters or fewer.");
+      return;
+    }
+    onConfirm(r);
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-xl font-bold text-gray-900">Suspend Account</h3>
-        <p className="text-sm text-gray-500 mb-6">
-          {user.name} will be temporarily blocked from logging in. This can
-          be reversed anytime.
-        </p>
+    <ModalShell onClose={busy ? () => {} : onClose}>
+      <h3 className="text-xl font-bold text-gray-900">Suspend Account</h3>
+      <p className="text-sm text-gray-500 mb-6">
+        {user.name} will be signed out and blocked from logging in, and will be emailed this reason. You can reverse it anytime.
+      </p>
 
-        <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-          Reason *
-        </label>
-        <textarea
-          value={reason}
-          onChange={(e) => {
-            setReason(e.target.value);
-            setError("");
-          }}
-          rows={3}
-          placeholder="e.g., Reported for suspicious activity, pending review"
-          className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 w-full resize-none focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-            error ? "border-red-400" : "border-gray-200"
-          }`}
-        />
-        {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
-
-        <div className="flex items-center justify-end gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors"
-          >
-            Close
-          </button>
-          <button
-            onClick={handleConfirm}
-            className="bg-[#1d2a1b] hover:bg-[#121c11] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors"
-          >
-            Suspend account
-          </button>
-        </div>
+      <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block" htmlFor="um-reason">
+        Reason *
+      </label>
+      <textarea
+        id="um-reason"
+        value={reason}
+        onChange={(e) => { setReason(e.target.value); setError(""); }}
+        rows={3}
+        maxLength={300}
+        placeholder="e.g., Reported for suspicious activity, pending review"
+        className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 w-full resize-none focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
+          error ? "border-red-400" : "border-gray-200"
+        }`}
+      />
+      <div className="flex justify-between">
+        <p className="mt-1 text-xs text-red-500">{error}</p>
+        <p className="mt-1 text-xs text-gray-400">{reason.length}/300</p>
       </div>
-    </div>
+      {serverError && <p className="mt-2 text-sm text-red-600">{serverError}</p>}
+
+      <div className="flex items-center justify-end gap-3 mt-6">
+        <button onClick={onClose} disabled={busy} className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50">
+          Close
+        </button>
+        <button onClick={handleConfirm} disabled={busy} className="bg-[#1d2a1b] hover:bg-[#121c11] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-60">
+          {busy ? "Suspending…" : "Suspend account"}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
-function DeleteAccountModal({ user, onConfirm, onCancel }) {
+function DeleteAccountModal({ user, busy, error, onConfirm, onCancel }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-xl font-bold text-red-600 mb-2">Delete Account</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          This permanently removes {user.name}'s account and its records.
-          This cannot be undone.
-        </p>
+    <ModalShell onClose={busy ? () => {} : onCancel}>
+      <h3 className="text-xl font-bold text-red-600 mb-2">Delete Account</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        This permanently removes {user.name}'s account and its farm records, and emails them that it was deleted. This cannot be undone.
+      </p>
+      {error && <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
 
-        <div className="flex items-center justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="bg-[#8b0000] hover:bg-[#660000] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors"
-          >
-            Delete permanently
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-3">
+        <button onClick={onCancel} disabled={busy} className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={onConfirm} disabled={busy} className="bg-[#8b0000] hover:bg-[#660000] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-60">
+          {busy ? "Deleting…" : "Delete permanently"}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
-function AddUserModal({ existingEmails, onSave, onCancel }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [userType, setUserType] = useState("");
-  const [errors, setErrors] = useState({});
-
-  function updateName(rawValue) {
-    setName(rawValue.replace(/[^a-zA-Z\s'-]/g, ""));
-    setErrors((prev) => ({ ...prev, name: undefined }));
-  }
-
-  function handleSave() {
-    const trimmedEmail = email.trim().toLowerCase();
-
-    const newErrors = {
-      name: !name.trim()
-        ? "Name is required."
-        : name.trim().length < 2
-        ? "Name must be at least 2 characters."
-        : !NAME_REGEX.test(name)
-        ? "Only letters, spaces, hyphens, and apostrophes allowed."
-        : null,
-      email: !trimmedEmail
-        ? "Email address is required."
-        : !EMAIL_REGEX.test(trimmedEmail)
-        ? "Enter a valid email address."
-        : existingEmails.includes(trimmedEmail)
-        ? "This email already exists on the platform."
-        : null,
-      userType: !userType ? "Select a user type." : null,
-    };
-    setErrors(newErrors);
-    if (Object.values(newErrors).some(Boolean)) return;
-
-    onSave({ name: name.trim(), email: trimmedEmail, type: userType });
-  }
-
+function PasswordResetModal({ user, busy, error, onConfirm, onCancel }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={onCancel}
-    >
-      <div
-        className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl border border-gray-100"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1">Add User</h3>
-            <p className="text-sm text-gray-500 mb-6">
-              Manually create an account. Most users self-register; use this
-              for support-created accounts.
-            </p>
-          </div>
-          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600" aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => updateName(e.target.value)}
-              placeholder="e.g., Charles Leclerc"
-              className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-                errors.name ? "border-red-400" : "border-gray-200"
-              }`}
-            />
-            {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              Email Address
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setErrors((prev) => ({ ...prev, email: undefined }));
-              }}
-              placeholder="name@example.com"
-              className={`bg-[#f4f4f4] border rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-                errors.email ? "border-red-400" : "border-gray-200"
-              }`}
-            />
-            {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">
-              User Type
-            </label>
-            <div className="relative">
-              <select
-                value={userType}
-                onChange={(e) => {
-                  setUserType(e.target.value);
-                  setErrors((prev) => ({ ...prev, userType: undefined }));
-                }}
-                className={`appearance-none bg-[#f4f4f4] border rounded-xl px-4 py-3 pr-10 text-sm text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41] focus:bg-white transition-all ${
-                  errors.userType ? "border-red-400" : "border-gray-200"
-                }`}
-              >
-                <option value="" disabled>
-                  Select user type
-                </option>
-                {USER_TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-5 h-5 text-gray-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
-            {errors.userType && <p className="mt-1 text-xs text-red-500">{errors.userType}</p>}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 mt-8">
-          <button
-            onClick={onCancel}
-            className="border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-2.5 rounded-xl text-sm transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors shadow-sm"
-          >
-            Add user
-          </button>
-        </div>
+    <ModalShell onClose={busy ? () => {} : onCancel}>
+      <h3 className="text-xl font-bold text-gray-900 mb-2">Send password reset</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        This emails {user.name} ({user.email}) asking them to reset their password using Forgot Password. Their current
+        password keeps working until they do.
+      </p>
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+      <div className="flex items-center justify-end gap-3">
+        <button onClick={onCancel} disabled={busy} className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50">
+          Cancel
+        </button>
+        <button onClick={onConfirm} disabled={busy} className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-60">
+          {busy ? "Sending…" : "Send email"}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
-export default function UserManagement() {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("All");
+export default function UserManagement({ onSignOut }) {
+  const [typeFilter, setTypeFilter] = useState("all");
+  const list = useAdminUserList({ type: typeFilter, onUnauthorized: onSignOut });
+  const { users, total, page, pages, limit, loading, error, search, setSearch, setPage, reload } = list;
+
   const [viewingUser, setViewingUser] = useState(null);
   const [updatingUser, setUpdatingUser] = useState(null);
   const [suspendingUser, setSuspendingUser] = useState(null);
+  const [resettingUser, setResettingUser] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
+  const [toast, setToast] = useState(null); // { message, tone }
+  const [busy, setBusy] = useState(false);
+  const [modalError, setModalError] = useState("");
+  const actingRef = useRef(false); // stops a double-click from sending twice
 
-  useEffect(() => {
-    let cancelled = false;
-    getUsers().then((data) => {
-      if (!cancelled) {
-        setUsers(data);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const filterTypeMap = {
-    All: null,
-    Farmers: "Farmer",
-    "Cooperative Owners": "Cooperative Owner",
-    "Financial Managers": "Financial Manager",
-  };
-
-  const filteredUsers = users.filter((u) => {
-    const matchesType = typeFilter === "All" || u.type === filterTypeMap[typeFilter];
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
-    return matchesType && matchesSearch;
-  });
-
-  async function handleUpdateSave(updatedUser) {
-    await updateUser();
-    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
-    setToastMessage(`${updatedUser.name}'s details updated`);
+  function closeModals() {
     setUpdatingUser(null);
-  }
-
-  async function handleSuspendConfirm(user, reason) {
-    await suspendUser(user.id, reason);
-    setUsers((prev) =>
-      prev.map((u) => (u.id === user.id ? { ...u, status: "suspended" } : u))
-    );
-    setToastMessage(`${user.name}'s account suspended`);
     setSuspendingUser(null);
-  }
-
-  async function handleActivate(user) {
-    await activateUser();
-    setUsers((prev) =>
-      prev.map((u) => (u.id === user.id ? { ...u, status: "active" } : u))
-    );
-    setToastMessage(`${user.name}'s account activated`);
-  }
-
-  async function handleConfirmDelete() {
-    await deleteUser();
-    setUsers((prev) => prev.filter((u) => u.id !== pendingDelete.id));
-    setToastMessage(`${pendingDelete.name}'s account deleted`);
+    setResettingUser(null);
     setPendingDelete(null);
+    setModalError("");
   }
 
-  async function handleAddUser({ name, email, type }) {
-    await createUser();
-    const newUser = {
-      id: `user-${Date.now()}`,
-      name,
-      email,
-      type,
-      org: "—",
-      status: "active",
-      joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }),
-    };
-    setUsers((prev) => [newUser, ...prev]);
-    setToastMessage("User account created successfully");
-    setIsAddModalOpen(false);
+  // Runs one admin action once at a time. Success: close the modal, show the
+  // toast, refresh the list. Failure: keep the modal open and show why.
+  async function perform(run, { inModal }) {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setBusy(true);
+    setModalError("");
+    try {
+      const outcome = await run();
+      closeModals();
+      setToast({ message: outcome.message, tone: outcome.tone || "success" });
+      if (outcome.afterDelete && users.length === 1 && page > 1) setPage(page - 1);
+      else reload({ quiet: true });
+    } catch (err) {
+      if (err && err.status === 401) {
+        onSignOut?.();
+        return;
+      }
+      const message = messageFrom(err, "Something went wrong. Please try again.");
+      if (inModal) setModalError(message);
+      else setToast({ message, tone: "error" });
+      // 404 means it's already gone — refresh so the list is truthful.
+      if (err && err.status === 404) reload({ quiet: true });
+    } finally {
+      actingRef.current = false;
+      setBusy(false);
+    }
   }
 
-  if (loading) {
-    return (
-      <div>
-        <h2 className="text-3xl font-bold text-gray-900">User Management</h2>
-        <div className="mt-6 text-center text-gray-400 text-sm py-10">
-          Loading users…
-        </div>
-      </div>
-    );
-  }
+  const emailNote = (result, ok) => (result && result.emailSent === false ? `${ok}, but the email couldn't be sent.` : ok);
+  const emailTone = (result) => (result && result.emailSent === false ? "error" : "success");
+
+  const handleUpdateSave = (changes) =>
+    perform(async () => {
+      if (Object.keys(changes).length === 0) return { message: "Nothing changed" };
+      const result = await updateAdminUser(updatingUser.id, changes);
+      return { message: emailNote(result, `${result.name || updatingUser.name}'s details updated`), tone: emailTone(result) };
+    }, { inModal: true });
+
+  const handleSuspendConfirm = (reason) =>
+    perform(async () => {
+      const result = await suspendAdminUser(suspendingUser.id, reason);
+      return { message: emailNote(result, `${suspendingUser.name}'s account suspended`), tone: emailTone(result) };
+    }, { inModal: true });
+
+  const handleActivate = (user) =>
+    perform(async () => {
+      const result = await reactivateAdminUser(user.id);
+      return { message: emailNote(result, `${user.name}'s account reactivated`), tone: emailTone(result) };
+    }, { inModal: false });
+
+  const handleReset = () =>
+    perform(async () => {
+      await sendAdminPasswordReset(resettingUser.id);
+      return { message: `Password reset email sent to ${resettingUser.email}` };
+    }, { inModal: true });
+
+  const handleConfirmDelete = () =>
+    perform(async () => {
+      const result = await deleteAdminUser(pendingDelete.id);
+      return { message: emailNote(result, `${pendingDelete.name}'s account deleted`), tone: emailTone(result), afterDelete: true };
+    }, { inModal: true });
+
+  const firstShown = total === 0 ? 0 : (page - 1) * limit + 1;
+  const lastShown = Math.min(total, page * limit);
 
   return (
     <div>
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-gray-900">User Management</h2>
-          <p className="mt-1 text-gray-500">
-            View, add, update, and delete accounts across the platform
-          </p>
-        </div>
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="mt-12 bg-[#38512f] hover:bg-[#2b3e24] text-white font-medium px-4 py-2 rounded-xl text-sm transition-colors"
-        >
-          + Add user
-        </button>
+      <div>
+        <h2 className="text-3xl font-bold text-gray-900">User Management</h2>
+        <p className="mt-1 text-gray-500">View, update, suspend, and delete accounts across the platform</p>
       </div>
 
       <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
@@ -714,9 +541,10 @@ export default function UserManagement() {
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search users by name or email..."
+            aria-label="Search users"
             className="bg-[#f4f4f4] border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30"
           />
         </div>
@@ -724,110 +552,134 @@ export default function UserManagement() {
         <div className="flex flex-wrap gap-2 sm:shrink-0">
           {TYPE_FILTERS.map((filter) => (
             <button
-              key={filter}
-              onClick={() => setTypeFilter(filter)}
+              key={filter.value}
+              onClick={() => setTypeFilter(filter.value)}
               className={
-                typeFilter === filter
+                typeFilter === filter.value
                   ? "bg-[#38512f] text-white font-medium px-4 py-2 rounded-xl text-sm"
                   : "bg-[#f0f0f0] text-gray-700 hover:bg-gray-200 font-medium px-4 py-2 rounded-xl text-sm transition-colors"
               }
             >
-              {filter}
+              {filter.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider">
-              <th className="pb-2 font-semibold">User</th>
-              <th className="pb-2 font-semibold">Type</th>
-              <th className="pb-2 font-semibold">Cooperative/Farm</th>
-              <th className="pb-2 font-semibold">Status</th>
-              <th className="pb-2 font-semibold">Joined</th>
-              <th className="pb-2 font-semibold">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredUsers.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-400 text-sm">
-                  No users match your search/filter.
-                </td>
+      <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm overflow-x-auto">
+        {error ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-[#c24141] font-medium">{error}</p>
+            <button
+              onClick={() => reload()}
+              className="mt-4 bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : (
+          <table className={`w-full text-sm transition-opacity ${loading && users.length > 0 ? "opacity-50" : ""}`}>
+            <thead>
+              <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider">
+                <th className="pb-2 font-semibold">User</th>
+                <th className="pb-2 font-semibold">Type</th>
+                <th className="pb-2 font-semibold">Cooperative</th>
+                <th className="pb-2 font-semibold">Status</th>
+                <th className="pb-2 font-semibold">Joined</th>
+                <th className="pb-2 font-semibold">Action</th>
               </tr>
-            ) : (
-              filteredUsers.map((u) => (
-                <tr key={u.id} className="border-t border-gray-50">
-                  <td className="py-3 pr-4">
-                    <p className="text-gray-900 font-medium">{u.name}</p>
-                    <p className="text-xs text-gray-400">{u.email}</p>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <TypeBadge type={u.type} />
-                  </td>
-                  <td className="py-3 pr-4 text-gray-700">{u.org}</td>
-                  <td className="py-3 pr-4">
-                    <StatusBadge status={u.status} />
-                  </td>
-                  <td className="py-3 pr-4 text-gray-500">{u.joined}</td>
-                  <td className="py-3">
-                    <ActionMenu
-                      user={u}
-                      onView={setViewingUser}
-                      onUpdate={setUpdatingUser}
-                      onSuspendRequest={setSuspendingUser}
-                      onActivate={handleActivate}
-                      onDeleteRequest={setPendingDelete}
-                    />
+            </thead>
+            <tbody>
+              {loading && users.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400 text-sm">Loading users…</td>
+                </tr>
+              ) : users.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400 text-sm">
+                    {search || typeFilter !== "all" ? "No users match your search/filter." : "No users yet."}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                users.map((u) => (
+                  <tr key={u.id} className="border-t border-gray-50">
+                    <td className="py-3 pr-4">
+                      <p className="text-gray-900 font-medium">{u.name}</p>
+                      <p className="text-xs text-gray-400">{u.email}</p>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <TypeBadge type={u.type} label={typeText(u)} />
+                    </td>
+                    <td className="py-3 pr-4 text-gray-700">{u.org || "—"}</td>
+                    <td className="py-3 pr-4">
+                      <StatusBadge status={u.status} />
+                    </td>
+                    <td className="py-3 pr-4 text-gray-500 whitespace-nowrap">{formatDate(u.joined)}</td>
+                    <td className="py-3">
+                      <ActionMenu
+                        user={u}
+                        onView={setViewingUser}
+                        onUpdate={(x) => { setModalError(""); setUpdatingUser(x); }}
+                        onSuspendRequest={(x) => { setModalError(""); setSuspendingUser(x); }}
+                        onActivate={handleActivate}
+                        onResetRequest={(x) => { setModalError(""); setResettingUser(x); }}
+                        onDeleteRequest={(x) => { setModalError(""); setPendingDelete(x); }}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
+
+        {!error && total > 0 && (
+          <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+            <span>
+              Showing {firstShown}–{lastShown} of {total}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage(page - 1)}
+                disabled={page <= 1}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <span>
+                Page {page} of {pages}
+              </span>
+              <button
+                onClick={() => setPage(page + 1)}
+                disabled={page >= pages}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {viewingUser && (
-        <ViewAccountModal user={viewingUser} onClose={() => setViewingUser(null)} />
-      )}
+      {viewingUser && <ViewAccountModal user={viewingUser} onClose={() => setViewingUser(null)} />}
 
       {updatingUser && (
-        <UpdateDetailsModal
-          user={updatingUser}
-          onSave={handleUpdateSave}
-          onClose={() => setUpdatingUser(null)}
-        />
+        <UpdateDetailsModal user={updatingUser} busy={busy} error={modalError} onSave={handleUpdateSave} onClose={closeModals} />
       )}
 
       {suspendingUser && (
-        <SuspendAccountModal
-          user={suspendingUser}
-          onConfirm={handleSuspendConfirm}
-          onClose={() => setSuspendingUser(null)}
-        />
+        <SuspendAccountModal user={suspendingUser} busy={busy} error={modalError} onConfirm={handleSuspendConfirm} onClose={closeModals} />
+      )}
+
+      {resettingUser && (
+        <PasswordResetModal user={resettingUser} busy={busy} error={modalError} onConfirm={handleReset} onCancel={closeModals} />
       )}
 
       {pendingDelete && (
-        <DeleteAccountModal
-          user={pendingDelete}
-          onConfirm={handleConfirmDelete}
-          onCancel={() => setPendingDelete(null)}
-        />
+        <DeleteAccountModal user={pendingDelete} busy={busy} error={modalError} onConfirm={handleConfirmDelete} onCancel={closeModals} />
       )}
 
-      {isAddModalOpen && (
-        <AddUserModal
-          existingEmails={users.map((u) => u.email.toLowerCase())}
-          onSave={handleAddUser}
-          onCancel={() => setIsAddModalOpen(false)}
-        />
-      )}
-
-      {toastMessage && (
-        <Toast message={toastMessage} onClose={() => setToastMessage("")} />
-      )}
+      {toast && <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />}
     </div>
   );
 }

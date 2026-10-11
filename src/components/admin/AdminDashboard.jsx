@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -26,11 +26,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import {
-  getAdminDashboard,
-  approveAccount,
-  declineAccount,
-} from "../../mocks/admin/adminDashboard.mock";
+import { authedRequest } from "../../api";
 import UserManagement from "./UserManagement";
 import FarmManagement from "./FarmManagement";
 import UserActivityMonitoring from "./UserActivityMonitoring";
@@ -95,6 +91,59 @@ function SidebarNavItem({ icon: Icon, label, active, onClick }) {
   );
 }
 
+function messageFrom(err, fallback) {
+  return err && err.message ? err.message : fallback;
+}
+
+function formatCount(n) {
+  return Number(n || 0).toLocaleString("en-US");
+}
+
+// "12m ago", "3h ago", "2d ago" — and a plain date once it is over a week old.
+function timeAgo(iso) {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(then).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// The server sends plain numbers; the wording under each number is made here.
+function buildKpiCards(k) {
+  const green = "text-[#4d6b41]";
+  const grey = "text-gray-500";
+  const orange = "text-[#b85d19]";
+  const pctActive = k.totalUsers > 0 ? Math.round((k.activeToday / k.totalUsers) * 100) : 0;
+  return {
+    totalUsers: {
+      value: formatCount(k.totalUsers),
+      tag: k.newThisWeek > 0 ? `↑ ${formatCount(k.newThisWeek)} this week` : "No new users this week",
+      tagColor: k.newThisWeek > 0 ? green : grey,
+    },
+    cooperatives: {
+      value: formatCount(k.activeCooperatives),
+      tag: k.pendingCooperatives > 0 ? `${formatCount(k.pendingCooperatives)} awaiting approval` : "No applications waiting",
+      tagColor: k.pendingCooperatives > 0 ? orange : grey,
+    },
+    activeToday: {
+      value: formatCount(k.activeToday),
+      tag: k.totalUsers > 0 ? `${pctActive}% of total users` : "No users yet",
+      tagColor: k.activeToday > 0 ? green : grey,
+    },
+    suspendedAccounts: {
+      value: formatCount(k.suspendedAccounts),
+      tag: k.suspendedAccounts > 0 ? "Needs review" : "None right now",
+      tagColor: k.suspendedAccounts > 0 ? orange : grey,
+    },
+  };
+}
+
 function KPICard({ label, value, tag, tagColor, borderColor }) {
   return (
     <div className={`border-l-4 ${borderColor} bg-white rounded-2xl p-5 shadow-sm border border-gray-100`}>
@@ -109,7 +158,7 @@ function CustomTooltip({ active, payload, label }) {
   if (!active || !payload || !payload.length) return null;
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-md px-3 py-2 text-xs font-semibold text-gray-900">
-      {label}: {payload[0].value}%
+      {label}: {payload[0].value} new {payload[0].value === 1 ? "account" : "accounts"}
     </div>
   );
 }
@@ -120,6 +169,7 @@ function AccountGrowthChart({ data }) {
       <h3 className="text-base font-bold text-gray-800 mb-4">
         Account Growth - Last 6 Months
       </h3>
+      <p className="-mt-3 mb-3 text-xs text-gray-400">New accounts created each month</p>
       <div style={{ width: "100%", height: 240 }}>
         <ResponsiveContainer>
           <BarChart data={data}>
@@ -130,7 +180,7 @@ function AccountGrowthChart({ data }) {
               axisLine={false}
               tickLine={false}
             />
-            <YAxis hide domain={[0, 100]} />
+            <YAxis hide domain={[0, (max) => Math.max(5, max)]} allowDecimals={false} />
             <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.03)" }} />
             <Bar dataKey="value" fill="#d9a736" radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive animationDuration={700} animationEasing="ease-out" />
           </BarChart>
@@ -146,29 +196,41 @@ function RecentActivityFeed({ activity, onNavigate }) {
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-bold text-gray-800">Recent Activity</h3>
         <button
-          onClick={() => onNavigate?.("Platform Record Monitoring")}
+          onClick={() => onNavigate?.("User Activity")}
           className="text-xs font-semibold text-[#4d6b41] hover:underline cursor-pointer"
         >
           View all &gt;
         </button>
       </div>
 
-      <div className="space-y-4">
-        {activity.map((item) => (
-          <div key={item.id} className="flex items-start gap-3">
-            <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.color}`} />
-            <div className="min-w-0">
-              <p className="text-sm text-gray-700">{item.text}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{item.time}</p>
+      {activity.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">No activity yet.</p>
+      ) : (
+        <div className="space-y-4">
+          {activity.map((item) => (
+            <div key={item.id} className="flex items-start gap-3">
+              <span
+                className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                  item.type === "cooperative" ? "bg-[#4d6b41]" : "bg-[#4a7fc9]"
+                }`}
+              />
+              <div className="min-w-0">
+                <p className="text-sm text-gray-700">{item.text}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{timeAgo(item.at)}</p>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function PendingApprovals({ approvals, onApprove, onDecline }) {
+function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
+  // Which row is showing "Are you sure?" for Decline. Declining is the one
+  // action here that tells an applicant "no", so it asks first.
+  const [confirmingId, setConfirmingId] = useState(null);
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
       <div className="flex items-center gap-2 mb-1">
@@ -178,7 +240,7 @@ function PendingApprovals({ approvals, onApprove, onDecline }) {
         </span>
       </div>
       <p className="text-xs text-gray-500 mb-4">
-        New accounts awaiting administrator review
+        Cooperative applications awaiting administrator review
       </p>
 
       {approvals.length === 0 ? (
@@ -190,28 +252,56 @@ function PendingApprovals({ approvals, onApprove, onDecline }) {
           {approvals.map((a) => (
             <div
               key={a.id}
-              className="flex items-center justify-between border border-gray-100 rounded-xl p-4"
+              className="flex items-center justify-between gap-3 border border-gray-100 rounded-xl p-4"
             >
-              <div>
-                <p className="font-semibold text-gray-900">{a.name}</p>
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900">{a.org}</p>
                 <p className="text-xs text-gray-500">
-                  {a.role} • {a.org}
+                  {a.role} • {a.name}
+                </p>
+                <p className="text-xs text-gray-400 truncate">
+                  {a.email} • applied {timeAgo(a.submittedAt)}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onDecline(a)}
-                  className="border border-gray-300 text-gray-700 px-4 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 transition-colors"
-                >
-                  Decline
-                </button>
-                <button
-                  onClick={() => onApprove(a)}
-                  className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-4 py-1.5 rounded-xl text-xs font-semibold transition-colors"
-                >
-                  Approve
-                </button>
-              </div>
+              {confirmingId === a.id ? (
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-gray-600">Decline this application?</span>
+                  <button
+                    onClick={() => setConfirmingId(null)}
+                    disabled={busyId === a.id}
+                    className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await onDecline(a);
+                      setConfirmingId(null);
+                    }}
+                    disabled={busyId === a.id}
+                    className="bg-[#c24141] hover:bg-[#a83535] text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {busyId === a.id ? "Declining…" : "Yes, decline"}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setConfirmingId(a.id)}
+                    disabled={busyId === a.id}
+                    className="border border-gray-300 text-gray-700 px-4 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    onClick={() => onApprove(a)}
+                    disabled={busyId === a.id}
+                    className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-4 py-1.5 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {busyId === a.id ? "Approving…" : "Approve"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -320,21 +410,26 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll }) {
   );
 }
 
-function Toast({ message, onClose }) {
+function Toast({ message, tone = "success", onClose }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(onClose, tone === "error" ? 6000 : 3000);
     return () => clearTimeout(timer);
-  }, [onClose]);
+  }, [onClose, tone]);
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#2d4027] text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium">
-      <CheckCircle2 size={16} />
+    <div
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium ${
+        tone === "error" ? "bg-[#c24141]" : "bg-[#2d4027]"
+      }`}
+    >
+      {tone === "error" ? <Info size={16} /> : <CheckCircle2 size={16} />}
       {message}
     </div>
   );
 }
 
-function AdminDashboardHome({ data, onApprove, onDecline, onNavigate }) {
+function AdminDashboardHome({ data, busyId, onApprove, onDecline, onNavigate }) {
+  const cards = buildKpiCards(data.kpis);
   return (
     <div>
       <h2 className="text-3xl font-bold text-gray-900">Platform Dashboard</h2>
@@ -352,12 +447,12 @@ function AdminDashboardHome({ data, onApprove, onDecline, onNavigate }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Total Users" {...data.kpis.totalUsers} borderColor="border-l-[#4d6b41]" />
-        <KPICard label="Cooperatives" {...data.kpis.cooperatives} borderColor="border-l-[#d9a736]" />
-        <KPICard label="Active Today" {...data.kpis.activeToday} borderColor="border-l-[#4a7fc9]" />
+        <KPICard label="Total Users" {...cards.totalUsers} borderColor="border-l-[#4d6b41]" />
+        <KPICard label="Cooperatives" {...cards.cooperatives} borderColor="border-l-[#d9a736]" />
+        <KPICard label="Active Today" {...cards.activeToday} borderColor="border-l-[#4a7fc9]" />
         <KPICard
           label="Suspended Accounts"
-          {...data.kpis.suspendedAccounts}
+          {...cards.suspendedAccounts}
           borderColor="border-l-[#c24141]"
         />
       </div>
@@ -369,6 +464,7 @@ function AdminDashboardHome({ data, onApprove, onDecline, onNavigate }) {
 
       <PendingApprovals
         approvals={data.pendingApprovals}
+        busyId={busyId}
         onApprove={onApprove}
         onDecline={onDecline}
       />
@@ -393,7 +489,10 @@ export default function AdminDashboard({ user, onSignOut }) {
   const [activeItem, setActiveItem] = useState("Dashboard");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [toast, setToast] = useState(null); // { message, tone }
+  const [busyId, setBusyId] = useState(null);
+  const actingRef = useRef(false); // blocks a double-click from sending two requests
 
   // Announcements now live here, once, shared by BOTH the bell popup and
   // the full Notification Management page — sending an announcement from
@@ -439,36 +538,76 @@ export default function AdminDashboard({ user, onSignOut }) {
     );
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    getAdminDashboard().then((result) => {
-      if (!cancelled) {
-        setData(result);
-        setLoading(false);
+  // Loads the real numbers. Called when the page opens and each time the
+  // admin comes back to the Dashboard tab, so the figures are never stale.
+  // `quiet` refreshes without flashing the "Loading…" screen.
+  const loadDashboard = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
+    setLoadError("");
+    try {
+      const result = await authedRequest("/api/admin/dashboard");
+      setData(result);
+    } catch (err) {
+      if (err.status === 401) {
+        // The login ran out and could not be renewed — back to the login page.
+        onSignOut?.();
+        return;
       }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      if (!quiet) setLoadError(messageFrom(err, "Could not load the dashboard."));
+    } finally {
+      setLoading(false);
+    }
+  }, [onSignOut]);
 
-  async function handleApprove(approval) {
-    await approveAccount();
-    setData((prev) => ({
-      ...prev,
-      pendingApprovals: prev.pendingApprovals.filter((a) => a.id !== approval.id),
-    }));
-    setToastMessage(`${approval.name} approved`);
+  useEffect(() => {
+    if (activeItem === "Dashboard") loadDashboard({ quiet: data !== null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeItem]);
+
+  // Approve / decline a cooperative application. Uses the existing admin-only
+  // endpoint, so the server — not this page — decides whether it is allowed.
+  async function changeApplication(approval, status) {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setBusyId(approval.id);
+    try {
+      const result = await authedRequest(`/api/cooperatives/${approval.id}/status`, {
+        method: "PATCH",
+        body: { status },
+      });
+      setData((prev) => ({
+        ...prev,
+        pendingApprovals: prev.pendingApprovals.filter((a) => a.id !== approval.id),
+        kpis: {
+          ...prev.kpis,
+          pendingCooperatives: Math.max(0, prev.kpis.pendingCooperatives - 1),
+          activeCooperatives: prev.kpis.activeCooperatives + (status === "active" ? 1 : 0),
+        },
+      }));
+      const done = status === "active" ? `${approval.org} approved` : `${approval.org} declined`;
+      // The decision is saved either way; this only says whether the owner's
+      // email went out.
+      if (result && result.emailSent === false) {
+        setToast({ message: `${done}, but the email to the owner couldn't be sent.`, tone: "error" });
+      } else {
+        setToast({ message: done, tone: "success" });
+      }
+    } catch (err) {
+      if (err.status === 404) {
+        // Someone already removed it — refresh so the list is truthful.
+        setToast({ message: "That application no longer exists. Refreshing the list.", tone: "error" });
+        loadDashboard({ quiet: true });
+      } else {
+        setToast({ message: messageFrom(err, "Could not update the application."), tone: "error" });
+      }
+    } finally {
+      actingRef.current = false;
+      setBusyId(null);
+    }
   }
 
-  async function handleDecline(approval) {
-    await declineAccount();
-    setData((prev) => ({
-      ...prev,
-      pendingApprovals: prev.pendingApprovals.filter((a) => a.id !== approval.id),
-    }));
-    setToastMessage(`${approval.name} declined`);
-  }
+  const handleApprove = (approval) => changeApplication(approval, "active");
+  const handleDecline = (approval) => changeApplication(approval, "rejected");
 
   const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
   const initials = `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase();
@@ -533,25 +672,36 @@ export default function AdminDashboard({ user, onSignOut }) {
           />
         </div>
 
-        {loading ? (
+        {activeItem === "Dashboard" && loading && !data ? (
           <div className="text-center text-gray-400 text-sm py-10">
             Loading dashboard…
+          </div>
+        ) : activeItem === "Dashboard" && (loadError || !data) ? (
+          <div className="bg-white rounded-xl p-10 shadow-sm border border-gray-100 text-center">
+            <p className="text-sm text-[#c24141] font-medium">{loadError || "Could not load the dashboard."}</p>
+            <button
+              onClick={() => loadDashboard()}
+              className="mt-4 bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+            >
+              Try again
+            </button>
           </div>
         ) : activeItem === "Dashboard" ? (
           <AdminDashboardHome
             data={data}
+            busyId={busyId}
             onApprove={handleApprove}
             onDecline={handleDecline}
             onNavigate={setActiveItem}
           />
         ) : activeItem === "User Management" ? (
-          <UserManagement />
+          <UserManagement onSignOut={onSignOut} />
         ) : activeItem === "Farm Management" ? (
-          <FarmManagement />
+          <FarmManagement onSignOut={onSignOut} />
         ) : activeItem === "User Activity" ? (
-          <UserActivityMonitoring />
+          <UserActivityMonitoring onSignOut={onSignOut} />
         ) : activeItem === "Account Status" ? (
-          <AccountStatusManagement />
+          <AccountStatusManagement onSignOut={onSignOut} />
         ) : activeItem === "Financial Record Monitoring" ? (
           <FinancialRecordMonitoring />
         ) : activeItem === "Reports & Analytics" ? (
@@ -562,7 +712,7 @@ export default function AdminDashboard({ user, onSignOut }) {
             onSendAnnouncement={handleSendAnnouncement}
           />
         ) : activeItem === "Audit Logs" ? (
-          <AuditLogs />
+          <AuditLogs onSignOut={onSignOut} />
         ) : activeItem === "Backup & Recovery" ? (
           <BackupRecovery />
         ) : activeItem === "System Monitoring & Maintenance" ? (
@@ -573,8 +723,8 @@ export default function AdminDashboard({ user, onSignOut }) {
       </main>
       </div>
 
-      {toastMessage && (
-        <Toast message={toastMessage} onClose={() => setToastMessage("")} />
+      {toast && (
+        <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />
       )}
     </div>
   );

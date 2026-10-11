@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { authedRequest } from "../../api";
 
 const ROLE_LABEL = { owner: "Owner", finance_manager: "Finance Manager", member: "Member" };
@@ -9,7 +9,6 @@ const ROLE_LABEL = { owner: "Owner", finance_manager: "Finance Manager", member:
 // set the server accepts. Anything else is dropped as it's typed.
 const NAME_STRIP = /[^\p{L}\p{M} '’.-]/gu;
 const NAME_VALID = /^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u;
-const PHONE_STRIP = /[^0-9+() .-]/g;
 const NEW_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
 
 function Toast({ message, onClose }) {
@@ -60,12 +59,192 @@ function validateNamePart(value, label) {
 }
 
 const EMPTY_PASSWORD_FORM = { current: "", newPassword: "", confirm: "" };
-const pickEditable = (u) => ({ firstName: u.firstName || "", lastName: u.lastName || "", phone: u.phone || "" });
+const pickEditable = (u) => ({ firstName: u.firstName || "", lastName: u.lastName || "" });
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // The server reports field problems as a list of details; show the first
 // specific one rather than a bare "Validation failed".
 const messageFrom = (err, fallback) =>
   (Array.isArray(err?.details) && err.details[0]?.message) || err?.message || fallback;
+
+function ChangeEmailCard({ currentEmail, onEmailChanged, showToast }) {
+  const [newEmail, setNewEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+
+  // Changing an email is two steps: ask for it (password checked, code sent to
+  // the NEW address), then confirm the code. The email only changes at the end.
+  const [awaitingOtp, setAwaitingOtp] = useState(false);
+  const [sentTo, setSentTo] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const verifyingRef = useRef(false);
+
+  function resetAll() {
+    setNewEmail("");
+    setPassword("");
+    setFormError("");
+    setAwaitingOtp(false);
+    setSentTo("");
+    setOtpCode("");
+    setOtpError("");
+  }
+
+  async function handleRequest() {
+    if (sendingRef.current) return;
+    const email = newEmail.trim();
+    if (!EMAIL_REGEX.test(email)) {
+      setFormError("Enter a valid email address.");
+      return;
+    }
+    if (email.toLowerCase() === (currentEmail || "").toLowerCase()) {
+      setFormError("That is already your email address.");
+      return;
+    }
+    if (!password) {
+      setFormError("Enter your current password to confirm it's you.");
+      return;
+    }
+
+    sendingRef.current = true;
+    setSending(true);
+    setFormError("");
+    try {
+      await authedRequest("/api/auth/change-email/request", {
+        method: "POST",
+        body: { newEmail: email, password },
+      });
+      setSentTo(email);
+      setPassword("");
+      setAwaitingOtp(true);
+    } catch (err) {
+      setFormError(messageFrom(err, "Something went wrong. Please try again."));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+
+  async function handleVerify() {
+    if (verifyingRef.current || otpCode.length !== 6) return;
+    verifyingRef.current = true;
+    setVerifying(true);
+    setOtpError("");
+    try {
+      const result = await authedRequest("/api/auth/change-email/verify", { method: "POST", body: { code: otpCode } });
+      onEmailChanged(result?.email || sentTo);
+      resetAll();
+      showToast("Email updated successfully");
+    } catch (err) {
+      setOtpError(messageFrom(err, "Invalid or expired code."));
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
+    }
+  }
+
+  if (awaitingOtp) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-6">
+        <h3 className="text-gray-900 font-semibold text-lg">Confirm Your New Email</h3>
+        <p className="text-xs text-gray-500 mb-6">
+          We sent a 6-digit code to <strong>{sentTo}</strong>. Enter it below. Your email stays <strong>{currentEmail}</strong>{" "}
+          until you do.
+        </p>
+        <div className="max-w-xs mb-6">
+          <FormField
+            label="Verification Code"
+            required
+            inputMode="numeric"
+            value={otpCode}
+            onChange={(v) => {
+              setOtpCode(v.replace(/\D/g, "").slice(0, 6));
+              setOtpError("");
+            }}
+            error={otpError}
+            placeholder="123456"
+            maxLength={6}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={resetAll}
+            className="border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 px-5 py-2 rounded-xl text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleVerify}
+            disabled={verifying || otpCode.length !== 6}
+            className="bg-[#4f7331] hover:bg-[#3f5d27] text-white px-5 py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {verifying ? "Verifying…" : "Confirm email"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-6">
+      <h3 className="text-gray-900 font-semibold text-lg">Change Email</h3>
+      <p className="text-xs text-gray-500 mb-6">
+        Your email is <strong>{currentEmail}</strong>. We'll send a code to the new address to make sure it's yours, and
+        we'll notify your current address about the change.
+      </p>
+      <div className="space-y-4 mb-6">
+        <FormField
+          label="New Email Address"
+          required
+          type="email"
+          value={newEmail}
+          onChange={(v) => {
+            setNewEmail(v);
+            setFormError("");
+          }}
+          placeholder="you@example.com"
+        />
+        <div>
+          <label className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 block">Current Password *</label>
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setFormError("");
+              }}
+              placeholder="Enter your current password"
+              className="border border-gray-200 bg-[#f4f4f4] text-gray-800 rounded-xl px-4 py-2.5 pr-10 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((p) => !p)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+      </div>
+      {formError && <p className="mb-4 text-sm text-red-600">{formError}</p>}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={handleRequest}
+          disabled={sending}
+          className="bg-[#4f7331] hover:bg-[#3f5d27] text-white px-5 py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {sending ? "Sending code…" : "Send code"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // user is the logged-in account from the dashboard; onProfileUpdated tells
 // the dashboard about a saved change so the sidebar and greeting update
@@ -137,19 +316,23 @@ export default function MyAccount({ onProfileUpdated }) {
     );
   }
 
-  // Only what actually changed is checked and sent. An untouched field (say,
-  // an older phone number saved before today's rules) never blocks you from
-  // fixing something else, and a save can't overwrite a field you didn't touch.
+  // Only what actually changed is checked and sent. An untouched field never
+  // blocks you from fixing something else, and a save can't overwrite a field
+  // you didn't touch.
   const original = pickEditable(saved);
-  const trimmed = { firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim() };
+  const trimmed = { firstName: form.firstName.trim(), lastName: form.lastName.trim() };
   const changes = {};
-  for (const key of ["firstName", "lastName", "phone"]) {
+  for (const key of ["firstName", "lastName"]) {
     if (trimmed[key] !== original[key]) changes[key] = trimmed[key];
   }
   const isDirty = Object.keys(changes).length > 0;
   const fullName = `${saved.firstName} ${saved.lastName}`.trim();
   const initials = `${saved.firstName?.[0] ?? ""}${saved.lastName?.[0] ?? ""}`.toUpperCase();
   const roleLabel = ROLE_LABEL[saved.orgRole] || "Member";
+  // Only the cooperative's owner can edit name and email. Finance managers and
+  // members see them but can only change their password. (The server enforces
+  // this too; this just stops showing controls that would be refused.)
+  const canEditProfile = saved.orgRole === "owner";
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -164,12 +347,10 @@ export default function MyAccount({ onProfileUpdated }) {
   }
 
   async function handleSaveInfo() {
-    if (savingRef.current || !isDirty) return;
-    const digits = form.phone.replace(/\D/g, "");
+    if (!canEditProfile || savingRef.current || !isDirty) return;
     const newErrors = {
       lastName: "lastName" in changes ? validateNamePart(form.lastName, "Last name") : null,
       firstName: "firstName" in changes ? validateNamePart(form.firstName, "First name") : null,
-      phone: "phone" in changes && changes.phone && digits.length < 7 ? "Enter a valid phone number (at least 7 digits)." : null,
     };
     setErrors(newErrors);
     if (Object.values(newErrors).some(Boolean)) return;
@@ -178,8 +359,8 @@ export default function MyAccount({ onProfileUpdated }) {
     setSaving(true);
     setSaveError("");
     try {
-      // Only the changed fields go. Email is never among them: it can't be
-      // changed from here.
+      // Only the changed fields go. Email is never among them: it changes
+      // through its own verified flow (Change Email below).
       const updated = await authedRequest("/api/auth/me", { method: "PATCH", body: changes });
       // Merged, not replaced: the server's reply holds only the personal
       // fields, and replacing would lose the role and cooperative shown above.
@@ -297,7 +478,8 @@ export default function MyAccount({ onProfileUpdated }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <FormField
             label="Last Name"
-            required
+            required={canEditProfile}
+            readOnly={!canEditProfile}
             value={form.lastName}
             onChange={(v) => update("lastName", v.replace(NAME_STRIP, ""))}
             error={errors.lastName}
@@ -306,7 +488,8 @@ export default function MyAccount({ onProfileUpdated }) {
           />
           <FormField
             label="First Name"
-            required
+            required={canEditProfile}
+            readOnly={!canEditProfile}
             value={form.firstName}
             onChange={(v) => update("firstName", v.replace(NAME_STRIP, ""))}
             error={errors.firstName}
@@ -314,27 +497,23 @@ export default function MyAccount({ onProfileUpdated }) {
             maxLength={50}
           />
           <FormField
-            label="Phone Number (optional)"
-            type="tel"
-            inputMode="tel"
-            value={form.phone}
-            onChange={(v) => update("phone", v.replace(PHONE_STRIP, ""))}
-            error={errors.phone}
-            placeholder="+63 917 123 4567"
-            maxLength={30}
-            hint="Your personal number — your cooperative's contact number is on Cooperative Profile."
-          />
-          <FormField
             label="Email Address"
             type="email"
             value={saved.email || ""}
             readOnly
-            hint="Your email is used to sign in and to receive verification codes, so it can't be changed here."
+            hint={canEditProfile ? "This is the email you sign in with. To change it, use Change Email below." : "This is the email you sign in with."}
           />
         </div>
 
-        {saveError && <p className="mb-4 text-sm text-red-600">{saveError}</p>}
+        {!canEditProfile && (
+          <p className="mb-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+            Only your cooperative's owner can change your name and email. You can change your password below.
+          </p>
+        )}
 
+        {canEditProfile && saveError && <p className="mb-4 text-sm text-red-600">{saveError}</p>}
+
+        {canEditProfile && (
         <div className="flex items-center justify-end gap-3">
           <button
             onClick={handleCancelInfo}
@@ -351,7 +530,20 @@ export default function MyAccount({ onProfileUpdated }) {
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
+        )}
       </div>
+
+      {/* Change Email */}
+      {canEditProfile && (
+        <ChangeEmailCard
+          currentEmail={saved.email}
+          showToast={setToastMessage}
+          onEmailChanged={(email) => {
+            setSaved((prev) => ({ ...prev, email }));
+            onProfileUpdated?.({ email });
+          }}
+        />
+      )}
 
       {/* Change Password */}
       <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">

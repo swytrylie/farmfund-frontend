@@ -71,6 +71,12 @@ const NAV_GROUPS = [
   },
 ];
 
+const ROLE_LABEL = { owner: "Owner", finance_manager: "Finance Manager", member: "Member" };
+
+// Pages only the cooperative's owner may open. The server refuses everyone
+// else too; this keeps the link out of their sidebar.
+const OWNER_ONLY_SECTIONS = ["Team & Invitations"];
+
 function SidebarNavItem({ icon: Icon, label, active, onClick }) {
   return (
     <button
@@ -179,6 +185,18 @@ export default function OrgDashboard({ user, onSignOut }) {
   // server enforces it too, this just hides buttons that would be refused.
   const canSendReminders = ["owner", "finance_manager"].includes(orgInfo.orgRole);
 
+  const isOwner = orgInfo.orgRole === "owner";
+  // The sidebar shows the real role of whoever is signed in. While the role is
+  // still being looked up it shows nothing, rather than a wrong label.
+  const roleLabel = ROLE_LABEL[orgInfo.orgRole] || "";
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => isOwner || !OWNER_ONLY_SECTIONS.includes(item.label)),
+  }));
+  // If someone is somehow on an owner-only page without being the owner (say
+  // their role finished loading after they opened it), show the dashboard.
+  const currentItem = !isOwner && OWNER_ONLY_SECTIONS.includes(activeItem) ? "Dashboard" : activeItem;
+
   const fullName = `${profile?.firstName ?? ""} ${profile?.lastName ?? ""}`.trim();
   const initials = `${profile?.firstName?.[0] ?? ""}${profile?.lastName?.[0] ?? ""}`.toUpperCase();
 
@@ -200,7 +218,7 @@ export default function OrgDashboard({ user, onSignOut }) {
      "Team & Invitations": TeamInvitations,
      "My Account": MyAccount,
   };
-  const ActiveSectionComponent = SECTION_COMPONENTS[activeItem];
+  const ActiveSectionComponent = SECTION_COMPONENTS[currentItem];
 
   return (
     <div className="flex h-screen max-h-screen overflow-hidden bg-gray-50">
@@ -210,7 +228,7 @@ export default function OrgDashboard({ user, onSignOut }) {
         </div>
 
         <nav className="flex-1 min-h-0 space-y-3 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {NAV_GROUPS.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group.label}>
               <p className="px-3 mb-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">
                 {group.label}
@@ -221,7 +239,7 @@ export default function OrgDashboard({ user, onSignOut }) {
                     key={item.label}
                     icon={item.icon}
                     label={item.label}
-                    active={item.label === activeItem}
+                    active={item.label === currentItem}
                     onClick={() => setActiveItem(item.label)}
                   />
                 ))}
@@ -236,7 +254,7 @@ export default function OrgDashboard({ user, onSignOut }) {
           </div>
           <div className="min-w-0">
             <p className="text-white font-bold text-sm truncate">{fullName}</p>
-            <p className="text-white/60 text-xs truncate">Owner</p>
+            <p className="text-white/60 text-xs truncate">{roleLabel}</p>
           </div>
         </div>
 
@@ -275,7 +293,7 @@ export default function OrgDashboard({ user, onSignOut }) {
             remindersError={remindersError}
           />
         ) : (
-          <ComingSoonPlaceholder sectionName={activeItem} />
+          <ComingSoonPlaceholder sectionName={currentItem} />
         )}
       </main>
       </div>

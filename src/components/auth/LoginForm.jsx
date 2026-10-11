@@ -40,8 +40,11 @@ export default function LoginForm({
       // result is { accessToken, user }
       onLoginSuccess?.(result);
     } catch (err) {
-      if (err.status === 403) {
-        // Server says the account is locked: open the locked screen
+      // The server uses 403 for several different reasons. Only the real
+      // lockout (too many wrong passwords) opens the locked screen; the others
+      // — email not verified yet, organization waiting for approval or
+      // declined — are shown as a plain message under the form.
+      if (err.status === 403 && /temporarily locked/i.test(err.message || "")) {
         onFailedAttempt?.({ locked: true });
       } else {
         setServerError(err.message);

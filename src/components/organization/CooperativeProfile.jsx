@@ -14,18 +14,19 @@ function Toast({ message, onClose }) {
   );
 }
 
-function FormField({ label, value, onChange, error, type = "text", maxLength }) {
+function FormField({ label, value, onChange, error, type = "text", maxLength, readOnly }) {
   return (
     <div>
       <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">{label}</label>
       <input
         type={type}
         value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={readOnly ? undefined : (e) => onChange(e.target.value)}
+        readOnly={readOnly}
         maxLength={maxLength}
-        className={`bg-white border rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30 ${
-          error ? "border-red-400" : "border-gray-200"
-        }`}
+        className={`border rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30 ${
+          readOnly ? "bg-gray-100 text-gray-500 cursor-not-allowed border-gray-200" : "bg-white"
+        } ${error ? "border-red-400" : "border-gray-200"}`}
       />
       {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
     </div>
@@ -57,6 +58,9 @@ export default function CooperativeProfile() {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  // Only the cooperative's owner can edit these details. Finance managers and
+  // members see them read-only. The server enforces this too.
+  const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +77,7 @@ export default function CooperativeProfile() {
         }
         const coop = await authedRequest(`/api/cooperatives/${me.cooperativeId}`);
         if (cancelled) return;
+        setCanEdit(me.orgRole === "owner");
         setSaved(coop);
         setForm(coop);
       } catch (err) {
@@ -119,6 +124,7 @@ export default function CooperativeProfile() {
   }
 
   async function handleSave() {
+    if (!canEdit) return;
     const newErrors = {
       name: validateName(form.name),
       contactEmail: validateEmail(form.contactEmail),
@@ -161,20 +167,27 @@ export default function CooperativeProfile() {
 
         {form.status === "pending" && (
           <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
-            Your cooperative is still awaiting admin approval. You can edit these details in the meantime.
+            Your cooperative is still awaiting admin approval.{canEdit && " You can edit these details in the meantime."}
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <FormField label="Cooperative Name" value={form.name} onChange={(v) => update("name", v)} error={errors.name} maxLength={100} />
-          <FormField label="Registration No." value={form.registrationNumber} onChange={(v) => update("registrationNumber", v)} maxLength={30} />
-          <FormField label="Address" value={form.address} onChange={(v) => update("address", v)} maxLength={150} />
-          <FormField label="Contact Email" type="email" value={form.contactEmail} onChange={(v) => update("contactEmail", v)} error={errors.contactEmail} />
-          <FormField label="Contact Phone" value={form.contactPhone} onChange={(v) => update("contactPhone", v)} maxLength={30} />
+          <FormField label="Cooperative Name" readOnly={!canEdit} value={form.name} onChange={(v) => update("name", v)} error={errors.name} maxLength={100} />
+          <FormField label="Registration No." readOnly={!canEdit} value={form.registrationNumber} onChange={(v) => update("registrationNumber", v)} maxLength={30} />
+          <FormField label="Address" readOnly={!canEdit} value={form.address} onChange={(v) => update("address", v)} maxLength={150} />
+          <FormField label="Contact Email" readOnly={!canEdit} type="email" value={form.contactEmail} onChange={(v) => update("contactEmail", v)} error={errors.contactEmail} />
+          <FormField label="Contact Phone" readOnly={!canEdit} value={form.contactPhone} onChange={(v) => update("contactPhone", v)} maxLength={30} />
         </div>
 
         <div className="border-t border-gray-200 my-6" />
 
+        {!canEdit && (
+          <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+            Only your cooperative's owner can edit these details.
+          </p>
+        )}
+
+        {canEdit && (
         <div className="flex items-center justify-end gap-3">
           <button
             onClick={handleCancel}
@@ -191,6 +204,7 @@ export default function CooperativeProfile() {
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
+        )}
       </div>
 
       {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage("")} />}

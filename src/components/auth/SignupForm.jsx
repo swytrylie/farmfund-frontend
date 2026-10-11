@@ -169,15 +169,20 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     setOtpError("");
     setVerifying(true);
     try {
-      // verify-signup's response is a REAL session, the same shape
-      // login() returns — flipping isEmailVerified to true and logging
-      // them in happen together, server-side, in one call.
+      // For an individual account, verifying the email is the last step.
+      // For an organization, the server confirms the email but does NOT
+      // start a session: an admin has to approve the cooperative first, so
+      // the answer is { pendingApproval: true, orgName }.
       const result = await apiRequest("/api/auth/verify-signup", {
         method: "POST",
         body: { email: data.email.trim(), code: otpCode },
       });
 
-      if (isOrganization) {
+      if (isOrganization && result?.pendingApproval) {
+        onSwitchMode("submitted-organization", result.orgName || pendingOrgName);
+      } else if (isOrganization) {
+        // Not expected any more (an organization always waits for approval),
+        // but if the server ever does hand back a session, honor it.
         onSwitchMode("org-signup-success", {
           accessToken: result.accessToken,
           user: {
