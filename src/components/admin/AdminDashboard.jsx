@@ -767,7 +767,7 @@ export default function AdminDashboard({ user, onSignOut }) {
         ) : activeItem === "Audit Logs" ? (
           <AuditLogs onSignOut={onSignOut} />
         ) : activeItem === "Backup & Recovery" ? (
-          <BackupRecovery />
+          <BackupRecovery onSignOut={onSignOut} />
         ) : activeItem === "System Monitoring & Maintenance" ? (
           <SystemMonitoring />
         ) : (
