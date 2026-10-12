@@ -33,11 +33,11 @@ import UserActivityMonitoring from "./UserActivityMonitoring";
 import AccountStatusManagement from "./AccountStatusManagement";
 import FinancialRecordMonitoring from "./FinancialRecordMonitoring";
 import ReportsAnalytics from "./ReportsAnalytics";
-import NotificationManagement from "./NotificationManagement";
+import NotificationManagement, { AnnouncementDetailsModal } from "./NotificationManagement";
 import AuditLogs from "./AuditLogs";
 import BackupRecovery from "./BackupRecovery";
 import SystemMonitoring from "./SystemMonitoring";
-import { getAnnouncements, sendAnnouncement } from "../../mocks/admin/adminNotifications.mock";
+import { formatDate } from "../../lib/adminUsers";
 
 const NAV_GROUPS = [
   {
@@ -310,7 +310,7 @@ function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
   );
 }
 
-function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll }) {
+function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement }) {
   const [isOpen, setIsOpen] = useState(false);
   // Tracked separately from the real announcements data — dismissing a
   // card here only hides it from THIS popup. The actual sent-announcement
@@ -331,6 +331,11 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll }) {
   function handleViewAll() {
     setIsOpen(false);
     onViewAll();
+  }
+
+  function handleOpen(a) {
+    setIsOpen(false);
+    onOpenAnnouncement(a);
   }
 
   return (
@@ -379,7 +384,19 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll }) {
                     <X size={14} />
                   </button>
 
-                  <div className="flex items-start gap-3 pl-4 pr-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`View details of ${a.title}`}
+                    onClick={() => handleOpen(a)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleOpen(a);
+                      }
+                    }}
+                    className="flex items-start gap-3 pl-4 pr-4 cursor-pointer"
+                  >
                     <span className="w-8 h-8 rounded-lg bg-[#e0ebda] flex items-center justify-center shrink-0">
                       <Megaphone size={16} className="text-[#2d4027]" />
                     </span>
@@ -494,41 +511,76 @@ export default function AdminDashboard({ user, onSignOut }) {
   const [busyId, setBusyId] = useState(null);
   const actingRef = useRef(false); // blocks a double-click from sending two requests
 
-  // Announcements now live here, once, shared by BOTH the bell popup and
-  // the full Notification Management page — sending an announcement from
-  // either place updates this one state, so both always show the same
-  // thing. Same pattern already used elsewhere in this app for alerts and
-  // payment reminders.
+  // The bell shows the five most recent announcements. They are real: the
+  // same ones listed on the Notification Management page, loaded from the
+  // server. "Unread" means sent after the last time this admin cleared the
+  // bell; that moment is remembered in this browser only.
   const [announcements, setAnnouncements] = useState([]);
+  const seenKey = "farmfund_admin_announcements_seen";
 
-  useEffect(() => {
-    let cancelled = false;
-    getAnnouncements().then((result) => {
-      if (!cancelled) setAnnouncements(result);
-    });
-    return () => {
-      cancelled = true;
-    };
+  const readSeenAt = () => {
+    try {
+      const v = Number(window.localStorage.getItem(seenKey));
+      return Number.isFinite(v) && v > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  const writeSeenAt = (ms) => {
+    try {
+      window.localStorage.setItem(seenKey, String(ms));
+    } catch {
+      /* the dot just won't be remembered */
+    }
+  };
+
+  const loadAnnouncements = useCallback(async () => {
+    try {
+      const result = await authedRequest("/api/admin/announcements?page=1&limit=5");
+      // First time on this browser: everything already sent counts as seen.
+      let seenAt = readSeenAt();
+      if (seenAt === null) {
+        seenAt = Date.now();
+        writeSeenAt(seenAt);
+      }
+      setAnnouncements(
+        result.announcements.map((a) => ({
+          id: a.id,
+          title: a.title,
+          audience: a.audienceLabel,
+          sent: formatDate(a.at),
+          unread: new Date(a.at).getTime() > seenAt,
+          full: a, // everything the details window needs
+        }))
+      );
+    } catch (err) {
+      if (err && err.status === 401) onSignOut?.();
+      // Any other failure: the bell simply shows what it has.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleSendAnnouncement({ title, message, audience }) {
-    await sendAnnouncement();
-    const newAnnouncement = {
-      id: `ann-${Date.now()}`,
-      title,
-      audience,
-      sent: new Date().toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-      status: "delivered",
-      unread: true,
-    };
-    setAnnouncements((prev) => [newAnnouncement, ...prev]);
+  useEffect(() => {
+    loadAnnouncements();
+  }, [loadAnnouncements]);
+
+  // The admin just sent one from the Notification Management page: it is
+  // theirs, so it shows in the bell already read.
+  function handleAnnouncementSent() {
+    writeSeenAt(Date.now());
+    loadAnnouncements();
+  }
+
+  // Clicking an announcement in the bell opens its full details, and counts
+  // as reading it.
+  const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
+  function handleOpenAnnouncement(a) {
+    setAnnouncements((prev) => prev.map((x) => (x.id === a.id ? { ...x, unread: false } : x)));
+    setOpenedAnnouncement(a.full);
   }
 
   function handleMarkAllAnnouncementsRead() {
+    writeSeenAt(Date.now());
     setAnnouncements((prev) => prev.map((a) => ({ ...a, unread: false })));
   }
 
@@ -669,6 +721,7 @@ export default function AdminDashboard({ user, onSignOut }) {
             onMarkAllRead={handleMarkAllAnnouncementsRead}
             onDismiss={handleDismissAnnouncement}
             onViewAll={() => setActiveItem("Notification Management")}
+            onOpenAnnouncement={handleOpenAnnouncement}
           />
         </div>
 
@@ -705,11 +758,11 @@ export default function AdminDashboard({ user, onSignOut }) {
         ) : activeItem === "Financial Record Monitoring" ? (
           <FinancialRecordMonitoring onSignOut={onSignOut} />
         ) : activeItem === "Reports & Analytics" ? (
-          <ReportsAnalytics />
+          <ReportsAnalytics onSignOut={onSignOut} />
         ) : activeItem === "Notification Management" ? (
           <NotificationManagement
-            announcements={announcements}
-            onSendAnnouncement={handleSendAnnouncement}
+            onSignOut={onSignOut}
+            onAnnouncementSent={handleAnnouncementSent}
           />
         ) : activeItem === "Audit Logs" ? (
           <AuditLogs onSignOut={onSignOut} />
@@ -722,6 +775,10 @@ export default function AdminDashboard({ user, onSignOut }) {
         )}
       </main>
       </div>
+
+      {openedAnnouncement && (
+        <AnnouncementDetailsModal item={openedAnnouncement} onClose={() => setOpenedAnnouncement(null)} />
+      )}
 
       {toast && (
         <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />

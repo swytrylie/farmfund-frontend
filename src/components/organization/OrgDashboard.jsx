@@ -12,10 +12,13 @@ import {
   Building2,
   UserPlus,
   UserCog,
+  Megaphone,
   LogOut,
 } from "lucide-react";
 import { authedRequest } from "../../api";
 import { fetchAllPages } from "../../lib/repaymentData";
+import { useAnnouncements } from "../../lib/announcements";
+import AnnouncementModal from "../shared/AnnouncementModal";
 import BorrowerManagement from "./BorrowerManagement";
 import LoanRecords from "./LoanRecords";
 import RepaymentTracking from "./RepaymentTracking";
@@ -29,11 +32,15 @@ import OrgDashboardHome from "./OrgDashboardHome";
  import CooperativeProfile from "./CooperativeProfile";
  import TeamInvitations from "./TeamInvitations";
  import MyAccount from "./MyAccount";
+import OrgAnnouncements from "./OrgAnnouncements";
 
 const NAV_GROUPS = [
   {
     label: "Overview",
-    items: [{ icon: LayoutDashboard, label: "Dashboard" }],
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard" },
+      { icon: Megaphone, label: "Announcements" },
+    ],
   },
   {
     label: "Borrowers",
@@ -181,6 +188,16 @@ export default function OrgDashboard({ user, onSignOut }) {
     return reminder;
   }
 
+  // Announcements from the FarmFund team, addressed to this person. Shared by
+  // the bell and the Announcements page. Opening one shows the full text and
+  // marks it read.
+  const announcements = useAnnouncements({ limit: 20 });
+  const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
+  function handleOpenAnnouncement(a) {
+    announcements.markRead(a.id);
+    setOpenedAnnouncement(a);
+  }
+
   // Only a cooperative's owner or finance managers can send reminders; the
   // server enforces it too, this just hides buttons that would be refused.
   const canSendReminders = ["owner", "finance_manager"].includes(orgInfo.orgRole);
@@ -206,6 +223,7 @@ export default function OrgDashboard({ user, onSignOut }) {
   // when a new section gets built.
   const SECTION_COMPONENTS = {
     Dashboard: OrgDashboardHome,
+    Announcements: OrgAnnouncements,
     "Borrower & Debt Management": BorrowerManagement,
     "Loan Records": LoanRecords,
     "Repayment Tracking": RepaymentTracking,
@@ -279,6 +297,11 @@ export default function OrgDashboard({ user, onSignOut }) {
           <ReminderBell
             reminders={reminders}
             onViewAll={() => setActiveItem("Payment Reminders")}
+            announcements={announcements.items}
+            unreadAnnouncements={announcements.unreadCount}
+            onOpenAnnouncement={handleOpenAnnouncement}
+            onViewAllAnnouncements={() => setActiveItem("Announcements")}
+            onOpen={announcements.reload}
           />
         </div>
 
@@ -291,12 +314,18 @@ export default function OrgDashboard({ user, onSignOut }) {
             onSendReminder={handleSendReminder}
             canSendReminders={canSendReminders}
             remindersError={remindersError}
+            announcementsState={announcements}
+            onOpenAnnouncement={handleOpenAnnouncement}
           />
         ) : (
           <ComingSoonPlaceholder sectionName={currentItem} />
         )}
       </main>
       </div>
+
+      {openedAnnouncement && (
+        <AnnouncementModal item={openedAnnouncement} onClose={() => setOpenedAnnouncement(null)} />
+      )}
     </div>
   );
 }

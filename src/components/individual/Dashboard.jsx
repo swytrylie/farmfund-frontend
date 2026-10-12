@@ -17,6 +17,7 @@ import {
   Clock,
 } from "lucide-react";
 import NotificationBell from "../shared/NotificationBell";
+import AnnouncementModal from "../shared/AnnouncementModal";
 import AIAdvisorWidget from "../shared/AIAdvisorWidget";
 import TrendsComparisons from "./TrendsComparisons";
 import IncomeExpenses from "./IncomeExpenses";
@@ -32,6 +33,7 @@ import Alerts from "./Alerts";
 import FarmProfile from "./FarmProfile";
 import { authedRequest } from "../../api";
 import { computeAlerts, dismissAlertById } from "../../lib/alertEngine";
+import { useAnnouncements } from "../../lib/announcements";
 
 // ---- Sidebar nav data ----
 const NAV_GROUPS = [
@@ -518,6 +520,16 @@ export default function Dashboard({ user, onSignOut }) {
     }
   }
 
+  // Announcements from the FarmFund team, addressed to this person. Shared by
+  // the bell and the Alerts page, like the alerts above. Opening one shows the
+  // full text and marks it read.
+  const announcements = useAnnouncements({ limit: 20 });
+  const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
+  function handleOpenAnnouncement(a) {
+    announcements.markRead(a.id);
+    setOpenedAnnouncement(a);
+  }
+
   const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
   const initials = `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase();
 
@@ -622,6 +634,11 @@ export default function Dashboard({ user, onSignOut }) {
             onDismissAlert={handleDismissAlert}
             onMarkAllAlertsRead={handleMarkAllAlertsRead}
             onViewAllAlerts={() => setActiveItem("Alerts")}
+            announcements={announcements.items}
+            unreadAnnouncements={announcements.unreadCount}
+            onOpenAnnouncement={handleOpenAnnouncement}
+            onMarkAllAnnouncementsRead={announcements.markAllRead}
+            onOpen={announcements.reload}
           />
         </div>
 
@@ -640,6 +657,9 @@ export default function Dashboard({ user, onSignOut }) {
             alerts={alerts}
             onDismissAlert={handleDismissAlert}
             onMarkAllAlertsRead={handleMarkAllAlertsRead}
+            announcements={announcements.items}
+            onOpenAnnouncement={handleOpenAnnouncement}
+            onMarkAllAnnouncementsRead={announcements.markAllRead}
             onNavigate={setActiveItem}
           />
         ) : (
@@ -653,6 +673,10 @@ export default function Dashboard({ user, onSignOut }) {
         {!isAdvisorPage && <AIAdvisorWidget />}
       </main>
       </div>
+
+      {openedAnnouncement && (
+        <AnnouncementModal item={openedAnnouncement} onClose={() => setOpenedAnnouncement(null)} />
+      )}
     </div>
   );
 }
