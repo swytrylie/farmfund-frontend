@@ -703,7 +703,7 @@ export default function AdminDashboard({ user, onSignOut }) {
         ) : activeItem === "Account Status" ? (
           <AccountStatusManagement onSignOut={onSignOut} />
         ) : activeItem === "Financial Record Monitoring" ? (
-          <FinancialRecordMonitoring />
+          <FinancialRecordMonitoring onSignOut={onSignOut} />
         ) : activeItem === "Reports & Analytics" ? (
           <ReportsAnalytics />
         ) : activeItem === "Notification Management" ? (
