@@ -6,11 +6,13 @@ import AdminLogin from "./components/admin/AdminLogin";
 import AdminDashboard from "./components/admin/AdminDashboard";
 import CompleteAccount from "./components/organization/CompleteAccount";
 import SecureAccount from "./components/organization/SecureAccount";
+import MaintenanceScreen from "./components/shared/MaintenanceScreen";
 import {
   apiRequest,
   refreshSession,
   setAccessToken,
   setSessionExpiredHandler,
+  setMaintenanceHandler,
 } from "./api";
 import "./index.css";
 
@@ -43,9 +45,33 @@ function App() {
   // are never active in the same tab at once.
   const [adminSession, setAdminSession] = useState(null);
 
+  // { until } while the platform is in maintenance mode, null otherwise.
+  // Never applies to the admin pages: admins keep full access.
+  const [maintenance, setMaintenance] = useState(null);
+
   // If a refresh ever fails mid-session, drop back to the login screen.
   useEffect(() => {
     setSessionExpiredHandler(() => setSession(null));
+  }, []);
+
+  // Any request the server refuses because of maintenance lands here, and
+  // so does the check made when the page first opens.
+  useEffect(() => {
+    if (isAdminPath) return;
+    setMaintenanceHandler((until) => setMaintenance({ until }));
+    let cancelled = false;
+    apiRequest("/api/system/status")
+      .then((status) => {
+        if (!cancelled && status?.maintenance?.active) {
+          setMaintenance({ until: status.maintenance.until || null });
+        }
+      })
+      .catch(() => {
+        // Could not ask: carry on, the first real request will say.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // On page load, try to restore the session from the refresh cookie.
@@ -96,6 +122,12 @@ function App() {
     }
     setAccessToken(null);
     setAdminSession(null);
+  }
+
+  // Maintenance mode: everyone except the admin pages sees this, whatever
+  // page they were on. It lets them back in when maintenance ends.
+  if (maintenance && !isAdminPath) {
+    return <MaintenanceScreen until={maintenance.until} onRecovered={() => setMaintenance(null)} />;
   }
 
   // "Secure my account" page from the email-changed notice — public too.

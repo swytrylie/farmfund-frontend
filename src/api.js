@@ -1,5 +1,13 @@
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Called with the end time (or null) when the server answers "down for
+// maintenance". App.jsx sets this to show the maintenance screen.
+let onMaintenance = () => {};
+
+export function setMaintenanceHandler(fn) {
+  onMaintenance = fn;
+}
+
 export async function apiRequest(path, { method = 'GET', body, token } = {}) {
   let res;
   try {
@@ -20,6 +28,15 @@ export async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const json = await res.json().catch(() => null);
 
   if (!res.ok) {
+    // The server is in maintenance mode: tell the app, so it can show the
+    // "Down for maintenance" screen. The request itself still fails below.
+    if (res.status === 503 && json?.code === 'MAINTENANCE') {
+      try {
+        onMaintenance(json.maintenance?.until || null);
+      } catch {
+        // a broken handler must never hide the real error
+      }
+    }
     // If the server explained exactly what was wrong (e.g. "name cannot contain < or >"),
     // show that instead of the generic "Validation failed".
     const specific =

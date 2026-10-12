@@ -769,7 +769,7 @@ export default function AdminDashboard({ user, onSignOut }) {
         ) : activeItem === "Backup & Recovery" ? (
           <BackupRecovery onSignOut={onSignOut} />
         ) : activeItem === "System Monitoring & Maintenance" ? (
-          <SystemMonitoring />
+          <SystemMonitoring onSignOut={onSignOut} />
         ) : (
           <ComingSoonPlaceholder sectionName={activeItem} />
         )}
