@@ -6,6 +6,7 @@ import {
   Pencil,
   Slash,
   Trash2,
+  Building2,
   Mail,
   X,
   CheckCircle2,
@@ -22,6 +23,7 @@ import {
   formatDate,
   formatDateTime,
 } from "../../lib/adminUsers";
+import { getCooperativeImpact, deleteCooperative, countRows } from "../../lib/adminArchive";
 import CertificatesPanel from "../shared/CertificatesPanel";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -85,7 +87,7 @@ function Toast({ message, tone = "success", onClose }) {
   );
 }
 
-function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onResetRequest, onDeleteRequest }) {
+function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onResetRequest, onDeleteRequest, onDeleteCoopRequest }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -149,13 +151,23 @@ function ActionMenu({ user, onView, onUpdate, onSuspendRequest, onActivate, onRe
               Reactivate
             </button>
           )}
-          <button
-            onClick={() => { setIsOpen(false); onDeleteRequest(user); }}
-            className={`${item} hover:bg-red-50 text-red-600`}
-          >
-            <Trash2 className="w-4 h-4 text-red-500" />
-            Delete
-          </button>
+          {user.type === "owner" && user.orgId ? (
+            <button
+              onClick={() => { setIsOpen(false); onDeleteCoopRequest(user); }}
+              className={`${item} hover:bg-red-50 text-red-600`}
+            >
+              <Building2 className="w-4 h-4 text-red-500" />
+              Delete cooperative
+            </button>
+          ) : (
+            <button
+              onClick={() => { setIsOpen(false); onDeleteRequest(user); }}
+              className={`${item} hover:bg-red-50 text-red-600`}
+            >
+              <Trash2 className="w-4 h-4 text-red-500" />
+              Delete
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -406,7 +418,10 @@ function DeleteAccountModal({ user, busy, error, onConfirm, onCancel }) {
     <ModalShell onClose={busy ? () => {} : onCancel}>
       <h3 className="text-xl font-bold text-red-600 mb-2">Delete Account</h3>
       <p className="text-sm text-gray-600 mb-4">
-        This permanently removes {user.name}'s account and its farm records, and emails them that it was deleted. This cannot be undone.
+        This removes {user.name}'s account and its farm records, certificates and notifications, and emails them that it was deleted.
+      </p>
+      <p className="text-sm text-gray-500 mb-4">
+        A copy is kept in the Archive for 30 days, so it can be restored if this was a mistake. After that it is gone for good.
       </p>
       {error && <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
 
@@ -415,8 +430,124 @@ function DeleteAccountModal({ user, busy, error, onConfirm, onCancel }) {
           Cancel
         </button>
         <button onClick={onConfirm} disabled={busy} className="bg-[#8b0000] hover:bg-[#660000] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-60">
-          {busy ? "Deleting…" : "Delete permanently"}
+          {busy ? "Deleting…" : "Delete account"}
         </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function DeleteCooperativeModal({ user, busy, error, onConfirm, onCancel, onSignOut, onGone }) {
+  const [impact, setImpact] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [typed, setTyped] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    getCooperativeImpact(user.orgId)
+      .then((d) => alive && setImpact(d))
+      .catch((err) => {
+        if (!alive) return;
+        if (err && err.status === 401) {
+          onSignOut?.();
+          return;
+        }
+        if (err && err.status === 404) onGone?.();
+        setLoadError(messageFrom(err, "Could not check what this would remove."));
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.orgId]);
+
+  const name = impact ? impact.cooperative.name : "";
+  const ready = Boolean(impact) && typed.trim() === name;
+  const rows = impact ? countRows(impact.counts) : [];
+  const cancel = busy ? () => {} : onCancel;
+
+  return (
+    <ModalShell onClose={cancel} width="max-w-lg">
+      <div role="dialog" aria-label="Delete this cooperative">
+        <h3 className="text-xl font-bold text-red-600 mb-2">Delete cooperative</h3>
+        {!impact && !loadError && <p className="text-sm text-gray-400">Checking what this would remove…</p>}
+        {loadError && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{loadError}</p>}
+
+        {impact && (
+          <>
+            <p className="text-sm text-gray-600 mb-3">
+              This deletes <strong>{name}</strong> and everything that belongs to it:
+            </p>
+            <div className="bg-[#fbe9e7] border border-[#f3c4b8] rounded-2xl p-4">
+              <ul className="text-sm text-gray-800 grid grid-cols-2 gap-x-4 gap-y-1">
+                {rows.map((r) => (
+                  <li key={r.key}>{r.text}</li>
+                ))}
+              </ul>
+            </div>
+
+            {impact.people.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-bold text-gray-800 mb-1.5">Accounts that will be deleted (they are emailed)</p>
+                <ul className="space-y-1">
+                  {impact.people.map((p) => (
+                    <li key={p.email} className="text-sm text-gray-700">
+                      {p.name} <span className="text-xs text-gray-400">{p.email}</span>{" "}
+                      <span className="text-xs text-gray-500">· {p.role}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {impact.kept.length > 0 && (
+              <div className="mt-4 bg-[#fff8e1] border border-[#f1d98a] rounded-2xl p-4">
+                <p className="text-xs font-bold text-[#8c6a00] mb-1.5">Accounts that will be kept</p>
+                <ul className="space-y-1">
+                  {impact.kept.map((p) => (
+                    <li key={p.email} className="text-xs text-gray-700">
+                      {p.name} <span className="text-gray-400">{p.email}</span> {p.reason}, so only their place in this cooperative is removed.
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="text-xs text-gray-500 mt-4">
+              Borrowers keep their accounts and farm records; only their loans with this cooperative go. A copy of everything is
+              kept in the Archive for {impact.retentionDays} days, so it can be restored if this was a mistake.
+            </p>
+
+            <label htmlFor="coop-confirm" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mt-5 mb-2">
+              Type the cooperative name to confirm
+            </label>
+            <input
+              id="coop-confirm"
+              type="text"
+              value={typed}
+              disabled={busy}
+              autoComplete="off"
+              placeholder={name}
+              onChange={(e) => setTyped(e.target.value)}
+              className="bg-[#f4f4f4] border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#8b0000] disabled:opacity-60"
+            />
+          </>
+        )}
+
+        {error && <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
+
+        <div className="flex items-center justify-end gap-3 mt-6">
+          <button onClick={cancel} disabled={busy} className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-5 py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => ready && onConfirm(typed.trim())}
+            disabled={!ready || busy}
+            className="bg-[#8b0000] hover:bg-[#660000] text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy ? "Deleting…" : "Delete cooperative"}
+          </button>
+        </div>
       </div>
     </ModalShell>
   );
@@ -453,6 +584,7 @@ export default function UserManagement({ onSignOut }) {
   const [suspendingUser, setSuspendingUser] = useState(null);
   const [resettingUser, setResettingUser] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [pendingDeleteCoop, setPendingDeleteCoop] = useState(null);
   const [toast, setToast] = useState(null); // { message, tone }
   const [busy, setBusy] = useState(false);
   const [modalError, setModalError] = useState("");
@@ -463,6 +595,7 @@ export default function UserManagement({ onSignOut }) {
     setSuspendingUser(null);
     setResettingUser(null);
     setPendingDelete(null);
+    setPendingDeleteCoop(null);
     setModalError("");
   }
 
@@ -477,7 +610,8 @@ export default function UserManagement({ onSignOut }) {
       const outcome = await run();
       closeModals();
       setToast({ message: outcome.message, tone: outcome.tone || "success" });
-      if (outcome.afterDelete && users.length === 1 && page > 1) setPage(page - 1);
+      if (outcome.resetPage && page > 1) setPage(1);
+      else if (outcome.afterDelete && users.length === 1 && page > 1) setPage(page - 1);
       else reload({ quiet: true });
     } catch (err) {
       if (err && err.status === 401) {
@@ -526,7 +660,22 @@ export default function UserManagement({ onSignOut }) {
   const handleConfirmDelete = () =>
     perform(async () => {
       const result = await deleteAdminUser(pendingDelete.id);
-      return { message: emailNote(result, `${pendingDelete.name}'s account deleted`), tone: emailTone(result), afterDelete: true };
+      return {
+        message: `${pendingDelete.name}'s account deleted${result && result.emailSent === false ? ", but the email couldn't be sent" : ""}. It is in the Archive for 30 days.`,
+        tone: emailTone(result),
+        afterDelete: true,
+      };
+    }, { inModal: true });
+
+  const handleConfirmDeleteCoop = (typedName) =>
+    perform(async () => {
+      const result = await deleteCooperative(pendingDeleteCoop.orgId, typedName);
+      const failed = result && result.emailsFailed > 0;
+      return {
+        message: `${typedName} deleted${failed ? `, but ${result.emailsFailed} notice email${result.emailsFailed === 1 ? "" : "s"} couldn't be sent` : ""}. It is in the Archive for 30 days.`,
+        tone: failed ? "error" : "success",
+        resetPage: true,
+      };
     }, { inModal: true });
 
   const firstShown = total === 0 ? 0 : (page - 1) * limit + 1;
@@ -627,6 +776,7 @@ export default function UserManagement({ onSignOut }) {
                         onActivate={handleActivate}
                         onResetRequest={(x) => { setModalError(""); setResettingUser(x); }}
                         onDeleteRequest={(x) => { setModalError(""); setPendingDelete(x); }}
+                        onDeleteCoopRequest={(x) => { setModalError(""); setPendingDeleteCoop(x); }}
                       />
                     </td>
                   </tr>
@@ -680,6 +830,18 @@ export default function UserManagement({ onSignOut }) {
 
       {pendingDelete && (
         <DeleteAccountModal user={pendingDelete} busy={busy} error={modalError} onConfirm={handleConfirmDelete} onCancel={closeModals} />
+      )}
+
+      {pendingDeleteCoop && (
+        <DeleteCooperativeModal
+          user={pendingDeleteCoop}
+          busy={busy}
+          error={modalError}
+          onConfirm={handleConfirmDeleteCoop}
+          onCancel={closeModals}
+          onSignOut={onSignOut}
+          onGone={() => reload({ quiet: true })}
+        />
       )}
 
       {toast && <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />}

@@ -10,6 +10,7 @@ import {
   Megaphone,
   FileClock,
   DatabaseBackup,
+  Archive,
   Wrench,
   LogOut,
   Bell,
@@ -36,6 +37,7 @@ import ReportsAnalytics from "./ReportsAnalytics";
 import NotificationManagement, { AnnouncementDetailsModal } from "./NotificationManagement";
 import AuditLogs from "./AuditLogs";
 import BackupRecovery from "./BackupRecovery";
+import ArchiveManagement from "./ArchiveManagement";
 import SystemMonitoring from "./SystemMonitoring";
 import { formatDate } from "../../lib/adminUsers";
 
@@ -70,6 +72,7 @@ const NAV_GROUPS = [
     items: [
       { icon: FileClock, label: "Audit Logs" },
       { icon: DatabaseBackup, label: "Backup & Recovery" },
+      { icon: Archive, label: "Archive" },
       { icon: Wrench, label: "System Monitoring & Maintenance" },
     ],
   },
@@ -768,6 +771,8 @@ export default function AdminDashboard({ user, onSignOut }) {
           <AuditLogs onSignOut={onSignOut} />
         ) : activeItem === "Backup & Recovery" ? (
           <BackupRecovery onSignOut={onSignOut} />
+        ) : activeItem === "Archive" ? (
+          <ArchiveManagement onSignOut={onSignOut} />
         ) : activeItem === "System Monitoring & Maintenance" ? (
           <SystemMonitoring onSignOut={onSignOut} />
         ) : (
