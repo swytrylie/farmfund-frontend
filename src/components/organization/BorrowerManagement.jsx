@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Search } from "lucide-react";
 import { authedRequest } from "../../api";
+import CertificatesPanel from "../shared/CertificatesPanel";
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
@@ -104,6 +105,8 @@ function BorrowerDetailPanel({ borrower }) {
           </div>
         ))}
       </div>
+
+      <CertificatesPanel key={borrower.id} farmerId={borrower.id} />
     </div>
   );
 }

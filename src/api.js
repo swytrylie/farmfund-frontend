@@ -9,16 +9,19 @@ export function setMaintenanceHandler(fn) {
 }
 
 export async function apiRequest(path, { method = 'GET', body, token } = {}) {
+  // A file upload is sent as-is (the browser adds its own multipart header);
+  // everything else is sent as JSON.
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
       method,
       headers: {
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(body && !isForm ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: 'include',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
     });
   } catch {
     // fetch itself failed: server down, wrong URL, or blocked by CORS

@@ -22,6 +22,7 @@ import {
   formatDate,
   formatDateTime,
 } from "../../lib/adminUsers";
+import CertificatesPanel from "../shared/CertificatesPanel";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -177,7 +178,7 @@ function ModalShell({ onClose, children, width = "max-w-md" }) {
   );
 }
 
-function ViewAccountModal({ user, onClose }) {
+function ViewAccountModal({ user, onClose, onSignOut }) {
   const fields = [
     { label: "Full Name", value: user.name },
     { label: "Email", value: user.email },
@@ -230,6 +231,8 @@ function ViewAccountModal({ user, onClose }) {
           </p>
         </div>
       )}
+
+      {user.type === "individual" && <CertificatesPanel key={user.id} farmerId={user.id} onSignOut={onSignOut} />}
 
       <div className="flex items-center justify-end mt-6">
         <button
@@ -661,7 +664,7 @@ export default function UserManagement({ onSignOut }) {
         )}
       </div>
 
-      {viewingUser && <ViewAccountModal user={viewingUser} onClose={() => setViewingUser(null)} />}
+      {viewingUser && <ViewAccountModal user={viewingUser} onClose={() => setViewingUser(null)} onSignOut={onSignOut} />}
 
       {updatingUser && (
         <UpdateDetailsModal user={updatingUser} busy={busy} error={modalError} onSave={handleUpdateSave} onClose={closeModals} />

@@ -1,10 +1,22 @@
 import { useState, useEffect, useRef } from "react";
-import { User, Home, Lock, Camera, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { User, Home, Lock, Camera, Eye, EyeOff, CheckCircle2, Award } from "lucide-react";
 import { authedRequest } from "../../api";
+import {
+  ACCEPT,
+  listMine,
+  uploadCertificate,
+  deleteCertificate,
+  openCertificate,
+  fileProblem,
+  bytesText,
+  messageFrom as certMessageFrom,
+} from "../../lib/certificates";
+import { StatusBadge, FileIcon, ReviewLine, CertificateMeta } from "../shared/CertificatesPanel";
 
 const TABS = [
   { key: "personal-info", label: "Personal Info", icon: User },
   { key: "farm-details", label: "Farm Details", icon: Home },
+  { key: "certificates", label: "Certificates", icon: Award },
   { key: "account-security", label: "Account & Security", icon: Lock },
 ];
 
@@ -622,6 +634,353 @@ function AccountSecurityTab({ user, showToast, onEmailChanged }) {
   );
 }
 
+function todayText() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function DeleteCertificateModal({ cert, busy, error, onConfirm, onCancel }) {
+  const cancel = () => {
+    if (!busy) onCancel();
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={cancel}>
+      <div
+        role="dialog"
+        aria-label="Delete certificate"
+        className="bg-white rounded-3xl p-7 max-w-md w-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-gray-900">Delete this certificate?</h3>
+        <p className="text-sm text-gray-500 mt-1">
+          “{cert.title}” will be removed for good. Your cooperative and the FarmFund admin will no longer see it.
+        </p>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-3 mt-6">
+          <button
+            onClick={cancel}
+            disabled={busy}
+            className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-5 py-2 rounded-xl bg-[#8b0000] hover:bg-[#660000] text-white text-sm font-semibold disabled:opacity-60"
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CertificatesTab({ showToast }) {
+  const [items, setItems] = useState([]);
+  const [max, setMax] = useState(20);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  const [title, setTitle] = useState("");
+  const [issuer, setIssuer] = useState("");
+  const [issuedOn, setIssuedOn] = useState("");
+  const [file, setFile] = useState(null);
+  const [fileKey, setFileKey] = useState(0); // changing it clears the file box
+  const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const uploadingRef = useRef(false);
+
+  const [deleting, setDeleting] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const deleteRef = useRef(false);
+
+  const [openingId, setOpeningId] = useState(null);
+  const openingRef = useRef(false);
+  const [notice, setNotice] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const result = await listMine();
+      setItems(result.certificates || []);
+      if (result.max) setMax(result.max);
+    } catch (err) {
+      setLoadError(certMessageFrom(err, "Could not load your certificates."));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await listMine();
+        if (cancelled) return;
+        setItems(result.certificates || []);
+        if (result.max) setMax(result.max);
+      } catch (err) {
+        if (!cancelled) setLoadError(certMessageFrom(err, "Could not load your certificates."));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const full = items.length >= max;
+
+  async function handleUpload() {
+    if (uploadingRef.current) return;
+    const t = title.trim();
+    const i = issuer.trim();
+    const newErrors = {
+      title: !t ? "Enter a title." : t.length < 3 ? "The title must be at least 3 characters." : t.length > 100 ? "The title must be 100 characters or fewer." : /[<>]/.test(t) ? "The title can't contain < or >." : null,
+      issuer: i.length > 100 ? "Must be 100 characters or fewer." : /[<>]/.test(i) ? "Can't contain < or >." : null,
+      issuedOn: issuedOn && issuedOn > todayText() ? "The date can't be in the future." : null,
+      file: fileProblem(file) || null,
+    };
+    setErrors(newErrors);
+    setFormError("");
+    if (Object.values(newErrors).some(Boolean)) return;
+
+    const form = new FormData();
+    form.append("title", t);
+    if (i) form.append("issuer", i);
+    if (issuedOn) form.append("issuedOn", issuedOn);
+    form.append("file", file);
+
+    uploadingRef.current = true;
+    setUploading(true);
+    try {
+      const result = await uploadCertificate(form);
+      setItems((prev) => [result.certificate, ...prev]);
+      setTitle("");
+      setIssuer("");
+      setIssuedOn("");
+      setFile(null);
+      setFileKey((k) => k + 1);
+      setErrors({});
+      showToast("Certificate uploaded!");
+    } catch (err) {
+      setFormError(certMessageFrom(err, "The upload failed. Please try again."));
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
+    }
+  }
+
+  async function handleView(cert) {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpeningId(cert.id);
+    setNotice("");
+    try {
+      const opened = await openCertificate(cert.id);
+      if (!opened) setNotice("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+    } catch (err) {
+      setNotice(certMessageFrom(err, "Could not open that certificate."));
+    } finally {
+      openingRef.current = false;
+      setOpeningId(null);
+    }
+  }
+
+  async function handleDelete() {
+    if (deleteRef.current || !deleting) return;
+    deleteRef.current = true;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      await deleteCertificate(deleting.id);
+      setItems((prev) => prev.filter((c) => c.id !== deleting.id));
+      setDeleting(null);
+      showToast("Certificate deleted.");
+    } catch (err) {
+      if (err && err.status === 404) {
+        setItems((prev) => prev.filter((c) => c.id !== deleting.id)); // already gone
+        setDeleting(null);
+      } else {
+        setDeleteError(certMessageFrom(err, "Could not delete it. Please try again."));
+      }
+    } finally {
+      deleteRef.current = false;
+      setDeleteBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <h3 className="font-bold text-gray-900 mb-1">Upload a Certificate</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Add a training certificate, permit or registration. Your cooperative and the FarmFund admin can view it and mark it
+          verified. PDF, JPG or PNG, up to 2 MB.
+        </p>
+
+        {full ? (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            You have reached the limit of {max} certificates. Delete one to add another.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <TextField
+                  label="Title *"
+                  value={title}
+                  onChange={(v) => {
+                    setTitle(v);
+                    setErrors((p) => ({ ...p, title: undefined }));
+                  }}
+                  error={errors.title}
+                  placeholder="e.g., Organic Farming Training"
+                />
+              </div>
+              <TextField
+                label="Issued by (optional)"
+                value={issuer}
+                onChange={(v) => {
+                  setIssuer(v);
+                  setErrors((p) => ({ ...p, issuer: undefined }));
+                }}
+                error={errors.issuer}
+                placeholder="e.g., Department of Agriculture"
+              />
+              <TextField
+                label="Date issued (optional)"
+                type="date"
+                value={issuedOn}
+                onChange={(v) => {
+                  setIssuedOn(v);
+                  setErrors((p) => ({ ...p, issuedOn: undefined }));
+                }}
+                error={errors.issuedOn}
+              />
+              <div className="sm:col-span-2">
+                <FieldLabel>File *</FieldLabel>
+                <input
+                  key={fileKey}
+                  type="file"
+                  accept={ACCEPT}
+                  aria-label="Certificate file"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] || null);
+                    setErrors((p) => ({ ...p, file: undefined }));
+                  }}
+                  className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-xl file:border-0 file:bg-[#f4f8f3] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[#3f6238] hover:file:bg-[#e8f0e4]"
+                />
+                {file && !errors.file && (
+                  <p className="mt-1 text-xs text-gray-400">
+                    {file.name} · {bytesText(file.size)}
+                  </p>
+                )}
+                {errors.file && <p className="mt-1 text-xs text-red-500">{errors.file}</p>}
+              </div>
+            </div>
+            {formError && <p className="mt-3 text-sm text-red-600">{formError}</p>}
+            <div className="mt-6">
+              <button
+                onClick={handleUpload}
+                disabled={uploading}
+                className="px-6 py-2.5 rounded-xl bg-[#4f7331] text-white text-sm font-semibold hover:bg-[#3f6238] transition-colors disabled:opacity-60"
+              >
+                {uploading ? "Uploading…" : "Upload Certificate"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-gray-900">My Certificates</h3>
+          {!loading && !loadError && (
+            <span className="text-xs text-gray-400">
+              {items.length} of {max}
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-gray-400 text-center py-6">Loading…</p>
+        ) : loadError ? (
+          <p className="text-sm text-red-600 text-center py-6">
+            {loadError}{" "}
+            <button onClick={load} className="font-semibold underline">
+              Try again
+            </button>
+          </p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">No certificates yet. Upload your first one above.</p>
+        ) : (
+          <ul className="space-y-3">
+            {items.map((c) => (
+              <li key={c.id} className="border border-gray-100 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <FileIcon type={c.fileType} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900 break-words min-w-0">{c.title}</p>
+                      <StatusBadge status={c.status} />
+                    </div>
+                    <CertificateMeta cert={c} />
+                    <ReviewLine cert={c} />
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() => handleView(c)}
+                        disabled={openingId !== null}
+                        aria-label={`View ${c.title}`}
+                        className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-1.5 rounded-xl text-xs font-medium disabled:opacity-50"
+                      >
+                        {openingId === c.id ? "Opening…" : "View"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeleteError("");
+                          setDeleting(c);
+                        }}
+                        aria-label={`Delete ${c.title}`}
+                        className="border border-gray-300 text-[#c62828] hover:bg-[#fbe9e7] px-4 py-1.5 rounded-xl text-xs font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {notice && (
+          <p role="status" className="mt-3 text-xs text-red-600 font-medium">
+            {notice}
+          </p>
+        )}
+      </div>
+
+      {deleting && (
+        <DeleteCertificateModal
+          cert={deleting}
+          busy={deleteBusy}
+          error={deleteError}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function FarmProfile() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -728,6 +1087,7 @@ export default function FarmProfile() {
                 No farm set up yet — create one from Income & Expenses first.
               </div>
             ))}
+          {activeTab === "certificates" && <CertificatesTab showToast={showToast} />}
           {activeTab === "account-security" && (
             <AccountSecurityTab user={user} showToast={showToast} onEmailChanged={(email) => setUser((prev) => ({ ...prev, email }))} />
           )}
