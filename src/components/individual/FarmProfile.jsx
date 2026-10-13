@@ -822,8 +822,8 @@ function CertificatesTab({ showToast }) {
       <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
         <h3 className="font-bold text-gray-900 mb-1">Upload a Certificate</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Add a training certificate, permit or registration. Your cooperative and the FarmFund admin can view it and mark it
-          verified. PDF, JPG or PNG, up to 2 MB.
+          Add a training certificate, permit or registration. Your cooperative and the FarmFund admin can view it, and the
+          FarmFund admin will verify it. PDF, JPG or PNG, up to 2 MB.
         </p>
 
         {full ? (

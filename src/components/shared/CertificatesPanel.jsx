@@ -252,6 +252,10 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
       ) : items.length === 0 ? (
         <p className="text-xs text-gray-400">This farmer has not uploaded any certificates.</p>
       ) : (
+        <>
+        {!canReview && (
+          <p className="text-xs text-gray-500 mb-3">Only the FarmFund admin can verify or reject certificates. You can view them here.</p>
+        )}
         <ul className="space-y-3">
           {items.map((c) => (
             <li key={c.id} className="bg-white border border-gray-100 rounded-xl p-3">
@@ -303,6 +307,7 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
             </li>
           ))}
         </ul>
+        </>
       )}
 
       {notice && (
