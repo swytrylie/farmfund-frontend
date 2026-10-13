@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, X } from "lucide-react";
+import { Bell, CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, Receipt, X } from "lucide-react";
 import { FILTERS } from "../../lib/alertEngine";
 import { formatAnnouncementDate } from "../../lib/announcements";
 
-// The alert categories plus announcements from the FarmFund team.
-const CATEGORIES = [...FILTERS, "Announcements"];
+// The alert categories, announcements from the FarmFund team, and payment
+// reminders from the person's cooperative.
+const CATEGORIES = [...FILTERS, "Announcements", "Reminders"];
+const isReminder = (a) => a.kind === "payment_reminder";
 
 // Same icon/color mapping as the full Alerts page (by iconKey), just with
 // bell-specific card styling since this is a compact popup, not a full page.
@@ -57,16 +59,18 @@ export default function NotificationBell({
   // conditions): the dot shows while any alert exists or any announcement
   // hasn't been opened yet.
   const showDot = alerts.length > 0 || unreadAnnouncements > 0;
-  const visibleAlerts =
-    activeCategory === "Announcements"
-      ? []
-      : alerts.filter((a) => activeCategory === "All" || a.categories.includes(activeCategory));
+  const messagesOnly = activeCategory === "Announcements" || activeCategory === "Reminders";
+  const visibleAlerts = messagesOnly
+    ? []
+    : alerts.filter((a) => activeCategory === "All" || a.categories.includes(activeCategory));
   const visibleAnnouncements =
     activeCategory === "All"
       ? announcements.slice(0, 3)
       : activeCategory === "Announcements"
-        ? announcements.slice(0, 10)
-        : [];
+        ? announcements.filter((a) => !isReminder(a)).slice(0, 10)
+        : activeCategory === "Reminders"
+          ? announcements.filter(isReminder).slice(0, 10)
+          : [];
 
   // Close on outside click
   useEffect(() => {
@@ -95,11 +99,13 @@ export default function NotificationBell({
     onOpenAnnouncement?.(a);
   }
 
-  // "Dismiss all" removes the alerts; announcements are only marked read
-  // (they are kept, and the full list is on the Alerts page).
+  // "Dismiss all" removes the alerts; announcements and reminders are only
+  // marked read (they are kept, and the full list is on the Alerts page).
   function handleClearAll() {
-    if (activeCategory !== "Announcements") onMarkAllAlertsRead?.();
-    if (activeCategory === "All" || activeCategory === "Announcements") onMarkAllAnnouncementsRead?.();
+    if (!messagesOnly) onMarkAllAlertsRead?.();
+    if (activeCategory === "All") onMarkAllAnnouncementsRead?.();
+    if (activeCategory === "Announcements") onMarkAllAnnouncementsRead?.("announcement");
+    if (activeCategory === "Reminders") onMarkAllAnnouncementsRead?.("payment_reminder");
   }
 
   return (
@@ -145,7 +151,7 @@ export default function NotificationBell({
                 onClick={handleClearAll}
                 className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer"
               >
-                {activeCategory === "Announcements" ? "Mark all as read" : "Dismiss all"}
+                {messagesOnly ? "Mark all as read" : "Dismiss all"}
               </button>
             </div>
           </div>
@@ -156,40 +162,61 @@ export default function NotificationBell({
               <p className="text-sm text-gray-400 text-center py-6">
                 {activeCategory === "Announcements"
                   ? "No announcements yet."
-                  : "No notifications in this category."}
+                  : activeCategory === "Reminders"
+                    ? "No payment reminders yet."
+                    : "No notifications in this category."}
               </p>
             )}
-            {visibleAnnouncements.map((a) => (
-              <div
-                key={`ann-${a.id}`}
-                role="button"
-                tabIndex={0}
-                aria-label={`Open announcement ${a.title}`}
-                onClick={() => handleOpenAnnouncement(a)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleOpenAnnouncement(a);
-                  }
-                }}
-                className="relative rounded-xl p-3 cursor-pointer bg-[#f4f8f3] border border-green-100 hover:bg-[#eef5ec] transition-colors"
-              >
-                {a.unread && <span className="absolute top-3 left-2 w-2 h-2 rounded-full bg-green-500" />}
-                <div className="flex gap-3 pl-3">
-                  <span className="shrink-0 p-2 rounded-lg h-fit bg-[#e0ebda] text-[#2d4027]">
-                    <Megaphone size={16} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="font-bold text-gray-900 text-sm">{a.title}</p>
-                    <p className="mt-0.5 text-xs text-gray-600 leading-relaxed line-clamp-2">{a.message}</p>
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] text-gray-400">{formatAnnouncementDate(a.at)}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#dbe7d3] text-[#2d4027]">Announcement</span>
+            {visibleAnnouncements.map((a) => {
+              const reminder = isReminder(a);
+              return (
+                <div
+                  key={`${reminder ? "rem" : "ann"}-${a.id}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${reminder ? "Open reminder" : "Open announcement"} ${a.title}`}
+                  onClick={() => handleOpenAnnouncement(a)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenAnnouncement(a);
+                    }
+                  }}
+                  className={`relative rounded-xl p-3 cursor-pointer border transition-colors ${
+                    reminder
+                      ? "bg-[#fff8ec] border-amber-100 hover:bg-[#fff1d9]"
+                      : "bg-[#f4f8f3] border-green-100 hover:bg-[#eef5ec]"
+                  }`}
+                >
+                  {a.unread && (
+                    <span className={`absolute top-3 left-2 w-2 h-2 rounded-full ${reminder ? "bg-amber-500" : "bg-green-500"}`} />
+                  )}
+                  <div className="flex gap-3 pl-3">
+                    <span
+                      className={`shrink-0 p-2 rounded-lg h-fit ${
+                        reminder ? "bg-amber-100 text-amber-700" : "bg-[#e0ebda] text-[#2d4027]"
+                      }`}
+                    >
+                      {reminder ? <Receipt size={16} /> : <Megaphone size={16} />}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 text-sm">{a.title}</p>
+                      <p className="mt-0.5 text-xs text-gray-600 leading-relaxed line-clamp-2">{a.message}</p>
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-gray-400">{formatAnnouncementDate(a.at)}</span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded ${
+                            reminder ? "bg-amber-100 text-amber-800" : "bg-[#dbe7d3] text-[#2d4027]"
+                          }`}
+                        >
+                          {reminder ? "Payment reminder" : "Announcement"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {visibleAlerts.map((a) => {
               const config = ICON_CONFIG[a.iconKey];
               const Icon = config.Icon;

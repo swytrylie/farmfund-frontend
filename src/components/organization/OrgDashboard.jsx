@@ -183,7 +183,13 @@ export default function OrgDashboard({ user, onSignOut }) {
       setRemindersError(err.message || "The reminder was sent, but the list couldn't be refreshed.");
     }
     if (reminder.status === "failed") {
-      throw new Error("The email couldn't be sent. It was logged as failed — you can try again.");
+      // The borrower may still have got the in-app notification (then a second
+      // reminder is held back for a few minutes so they are not notified twice).
+      throw new Error(
+        reminder.inApp
+          ? "The email couldn't be sent, but the borrower can still see this reminder in their FarmFund notifications."
+          : "The email couldn't be sent. It was logged as failed — you can try again."
+      );
     }
     return reminder;
   }

@@ -78,7 +78,7 @@ export default function SendReminderModal({ loan, loanOptions = [], onSend, onCa
           <div>
             <h3 className="text-xl font-bold text-gray-900">Send Payment Reminder</h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              This is emailed to the borrower's address on file, along with their real balance and due date.
+              This is emailed to the borrower's address on file and also appears in their FarmFund notifications, along with their real balance and due date.
             </p>
           </div>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-600" aria-label="Close">
@@ -127,7 +127,7 @@ export default function SendReminderModal({ loan, loanOptions = [], onSend, onCa
               {activeLoan &&
                 (recipientEmail ? (
                   <p className="mt-1.5 text-xs text-gray-500">
-                    Will be emailed to <strong>{recipientEmail}</strong>
+                    Will be emailed to <strong>{recipientEmail}</strong> and shown in their FarmFund notifications
                   </p>
                 ) : (
                   <p className="mt-1.5 text-xs text-red-500">

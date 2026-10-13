@@ -1,4 +1,4 @@
-import {useState, useEffect } from "react";
+import {useState, useEffect, useMemo } from "react";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -34,6 +34,7 @@ import FarmProfile from "./FarmProfile";
 import { authedRequest } from "../../api";
 import { computeAlerts, dismissAlertById } from "../../lib/alertEngine";
 import { useAnnouncements } from "../../lib/announcements";
+import { useNotifications } from "../../lib/notifications";
 
 // ---- Sidebar nav data ----
 const NAV_GROUPS = [
@@ -520,14 +521,35 @@ export default function Dashboard({ user, onSignOut }) {
     }
   }
 
-  // Announcements from the FarmFund team, addressed to this person. Shared by
-  // the bell and the Alerts page, like the alerts above. Opening one shows the
-  // full text and marks it read.
+  // Messages for this person: announcements from the FarmFund team, and payment
+  // reminders their cooperative sent them. Both are shown together in the bell
+  // and on the Alerts page (each item says what it is, via `kind`). Opening one
+  // shows the full text and marks it read.
   const announcements = useAnnouncements({ limit: 20 });
+  const reminders = useNotifications({ limit: 20 });
+  const inbox = useMemo(
+    () =>
+      [
+        ...announcements.items.map((a) => ({ ...a, kind: "announcement" })),
+        ...reminders.items,
+      ].sort((x, y) => new Date(y.at) - new Date(x.at)),
+    [announcements.items, reminders.items]
+  );
+  const unreadInbox = announcements.unreadCount + reminders.unreadCount;
   const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
   function handleOpenAnnouncement(a) {
-    announcements.markRead(a.id);
+    if (a.kind === "payment_reminder") reminders.markRead(a.id);
+    else announcements.markRead(a.id);
     setOpenedAnnouncement(a);
+  }
+  // kind: "announcement" | "payment_reminder" | undefined (= both)
+  function handleMarkAllInboxRead(kind) {
+    if (!kind || kind === "announcement") announcements.markAllRead();
+    if (!kind || kind === "payment_reminder") reminders.markAllRead();
+  }
+  function reloadInbox() {
+    announcements.reload();
+    reminders.reload();
   }
 
   const fullName = `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim();
@@ -634,11 +656,11 @@ export default function Dashboard({ user, onSignOut }) {
             onDismissAlert={handleDismissAlert}
             onMarkAllAlertsRead={handleMarkAllAlertsRead}
             onViewAllAlerts={() => setActiveItem("Alerts")}
-            announcements={announcements.items}
-            unreadAnnouncements={announcements.unreadCount}
+            announcements={inbox}
+            unreadAnnouncements={unreadInbox}
             onOpenAnnouncement={handleOpenAnnouncement}
-            onMarkAllAnnouncementsRead={announcements.markAllRead}
-            onOpen={announcements.reload}
+            onMarkAllAnnouncementsRead={handleMarkAllInboxRead}
+            onOpen={reloadInbox}
           />
         </div>
 
@@ -657,9 +679,9 @@ export default function Dashboard({ user, onSignOut }) {
             alerts={alerts}
             onDismissAlert={handleDismissAlert}
             onMarkAllAlertsRead={handleMarkAllAlertsRead}
-            announcements={announcements.items}
+            announcements={inbox}
             onOpenAnnouncement={handleOpenAnnouncement}
-            onMarkAllAnnouncementsRead={announcements.markAllRead}
+            onMarkAllAnnouncementsRead={handleMarkAllInboxRead}
             onNavigate={setActiveItem}
           />
         ) : (

@@ -135,7 +135,7 @@ export default function PaymentReminders({ reminders = [], onSendReminder, canSe
                         <p className="text-[11px] text-gray-400">{r.recipientEmail}</p>
                       </td>
                       <td className="py-3 pr-4 text-gray-600">{REMINDER_TYPE_LABEL[r.type] || r.type}</td>
-                      <td className="py-3 pr-4 text-gray-600">Email</td>
+                      <td className="py-3 pr-4 text-gray-600">{r.inApp ? "Email + in-app" : "Email"}</td>
                       <td className="py-3 pr-4 text-gray-500">{formatDate(r.createdAt)}</td>
                       <td className="py-3 pr-4 text-gray-600">{r.sentBy ? personName(r.sentBy) : "—"}</td>
                       <td className="py-3">

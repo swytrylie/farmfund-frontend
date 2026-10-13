@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, X } from "lucide-react";
+import { CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, Receipt, X } from "lucide-react";
 import { FILTERS } from "../../lib/alertEngine";
 import { formatAnnouncementDate } from "../../lib/announcements";
 
-// The alert categories plus announcements from the FarmFund team.
-const PAGE_FILTERS = [...FILTERS, "Announcements"];
+// The alert categories, announcements from the FarmFund team, and payment
+// reminders from the person's cooperative.
+const PAGE_FILTERS = [...FILTERS, "Announcements", "Reminders"];
+const isReminder = (a) => a.kind === "payment_reminder";
 
 const ICON_CONFIG = {
   loan: { Icon: CreditCard, bg: "bg-[#fce7f3]", color: "text-red-600" },
@@ -51,14 +53,16 @@ function AlertCard({ alert, onDismiss }) {
   );
 }
 
-// A message from the FarmFund team. Clicking it opens the full text (and
+// A message for this person: either from the FarmFund team (announcement) or a
+// payment reminder from their cooperative. Clicking it opens the full text (and
 // counts as reading it).
 function AnnouncementCard({ announcement, onOpen }) {
+  const reminder = isReminder(announcement);
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Open announcement ${announcement.title}`}
+      aria-label={`${reminder ? "Open reminder" : "Open announcement"} ${announcement.title}`}
       onClick={() => onOpen(announcement)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -66,14 +70,25 @@ function AnnouncementCard({ announcement, onOpen }) {
           onOpen(announcement);
         }
       }}
-      className="bg-[#f4f8f3] border border-green-100 rounded-2xl p-5 shadow-sm relative flex items-start gap-4 mb-4 cursor-pointer hover:bg-[#eef5ec] transition-colors"
+      className={`border rounded-2xl p-5 shadow-sm relative flex items-start gap-4 mb-4 cursor-pointer transition-colors ${
+        reminder
+          ? "bg-[#fff8ec] border-amber-100 hover:bg-[#fff1d9]"
+          : "bg-[#f4f8f3] border-green-100 hover:bg-[#eef5ec]"
+      }`}
     >
       {announcement.unread && (
-        <span data-testid="unread-dot" className="absolute top-5 left-2 w-2 h-2 rounded-full bg-green-500" />
+        <span
+          data-testid="unread-dot"
+          className={`absolute top-5 left-2 w-2 h-2 rounded-full ${reminder ? "bg-amber-500" : "bg-green-500"}`}
+        />
       )}
 
-      <span className="bg-[#e0ebda] text-[#2d4027] p-3 rounded-full flex items-center justify-center shrink-0">
-        <Megaphone size={18} />
+      <span
+        className={`p-3 rounded-full flex items-center justify-center shrink-0 ${
+          reminder ? "bg-amber-100 text-amber-700" : "bg-[#e0ebda] text-[#2d4027]"
+        }`}
+      >
+        {reminder ? <Receipt size={18} /> : <Megaphone size={18} />}
       </span>
 
       <div className="min-w-0">
@@ -81,7 +96,13 @@ function AnnouncementCard({ announcement, onOpen }) {
         <p className="mt-1 text-sm text-gray-600 leading-relaxed line-clamp-2">{announcement.message}</p>
         <div className="mt-2 flex items-center gap-2">
           <span className="text-xs text-gray-400">{formatAnnouncementDate(announcement.at)}</span>
-          <span className="bg-[#dbe7d3] text-[#2d4027] text-xs px-2.5 py-0.5 rounded-md font-medium">Announcement</span>
+          <span
+            className={`text-xs px-2.5 py-0.5 rounded-md font-medium ${
+              reminder ? "bg-amber-100 text-amber-800" : "bg-[#dbe7d3] text-[#2d4027]"
+            }`}
+          >
+            {reminder ? "Payment reminder" : "Announcement"}
+          </span>
         </div>
       </div>
     </div>
@@ -102,19 +123,29 @@ export default function Alerts({
 }) {
   const [activeFilter, setActiveFilter] = useState("All");
 
-  const showAnnouncements = activeFilter === "All" || activeFilter === "Announcements";
-  const filteredAnnouncements = showAnnouncements ? announcements : [];
+  const messagesOnly = activeFilter === "Announcements" || activeFilter === "Reminders";
+  const filteredAnnouncements =
+    activeFilter === "All"
+      ? announcements
+      : activeFilter === "Announcements"
+        ? announcements.filter((a) => !isReminder(a))
+        : activeFilter === "Reminders"
+          ? announcements.filter(isReminder)
+          : [];
   const filteredAlerts =
-    activeFilter === "Announcements"
+    messagesOnly
       ? []
       : activeFilter === "All"
         ? alerts
         : alerts.filter((a) => a.categories.includes(activeFilter));
 
-  // "Dismiss all" removes the alerts; announcements are only marked as read.
+  // "Dismiss all" removes the alerts; announcements and reminders are only
+  // marked as read.
   function handleClearAll() {
-    if (activeFilter !== "Announcements") onMarkAllAlertsRead?.();
-    if (activeFilter === "All" || activeFilter === "Announcements") onMarkAllAnnouncementsRead?.();
+    if (!messagesOnly) onMarkAllAlertsRead?.();
+    if (activeFilter === "All") onMarkAllAnnouncementsRead?.();
+    if (activeFilter === "Announcements") onMarkAllAnnouncementsRead?.("announcement");
+    if (activeFilter === "Reminders") onMarkAllAnnouncementsRead?.("payment_reminder");
   }
 
   const nothingAtAll = alerts.length === 0 && announcements.length === 0;
@@ -125,7 +156,7 @@ export default function Alerts({
         Alerts & Notifications
       </h2>
       <p className="mt-1 text-gray-500">
-        Payments, budgets, important farm events, and announcements from FarmFund
+        Payments, budgets, important farm events, payment reminders, and announcements from FarmFund
       </p>
 
       {/* Filter pills + Mark as all read */}
@@ -150,7 +181,7 @@ export default function Alerts({
           onClick={handleClearAll}
           className="text-gray-600 hover:text-gray-900 text-sm font-medium cursor-pointer"
         >
-          {activeFilter === "Announcements" ? "Mark all as read" : "Dismiss all"}
+          {messagesOnly ? "Mark all as read" : "Dismiss all"}
         </button>
       </div>
 
@@ -160,7 +191,9 @@ export default function Alerts({
           <p className="text-gray-400 text-sm">
             {activeFilter === "Announcements"
               ? "No announcements yet."
-              : nothingAtAll
+              : activeFilter === "Reminders"
+                ? "No payment reminders yet."
+                : nothingAtAll
                 ? "No alerts right now."
                 : `No ${activeFilter.toLowerCase()} alerts right now.`}
           </p>
