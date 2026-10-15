@@ -12,9 +12,40 @@ export const peso = (n) =>
 export const METHOD_LABEL = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
-  mobile_wallet: "Mobile Wallet (GCash, Maya)",
+  gcash: "GCash",
+  maya: "Maya",
+  mobile_wallet: "Other Mobile Wallet",
   other: "Other",
 };
+
+// Today's calendar date on this device, as YYYY-MM-DD (what <input type="date"> uses).
+export const todayLocalISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// Keeps only what a money amount can contain as it's typed: digits and one
+// decimal point, at most 2 decimal places — so letters, symbols, and the
+// "1e9" scientific-notation trick can never get into the field at all.
+export function sanitizeAmount(raw) {
+  let cleaned = raw.replace(/[^\d.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  if (firstDot !== -1) {
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+  }
+  if (cleaned.startsWith(".")) cleaned = "0" + cleaned;
+  const [intPart, decPart] = cleaned.split(".");
+  const trimmedInt = intPart.replace(/^0+(?=\d)/, "");
+  return decPart === undefined ? trimmedInt : `${trimmedInt}.${decPart.slice(0, 2)}`;
+}
+
+// The typed amount shown with thousands separators ("1234.5" -> "1,234.5").
+export function displayAmount(raw) {
+  if (raw === "") return "";
+  const [intPart, decPart] = raw.split(".");
+  const formattedInt = Number(intPart).toLocaleString("en-US");
+  return decPart === undefined ? formattedInt : `${formattedInt}.${decPart}`;
+}
 
 // Real loans have no human-friendly number, so this gives each one a short,
 // stable reference (the last 6 characters of its id) to tell two loans from

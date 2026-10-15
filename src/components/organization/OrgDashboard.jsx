@@ -18,6 +18,7 @@ import {
 import { authedRequest } from "../../api";
 import { fetchAllPages } from "../../lib/repaymentData";
 import { useAnnouncements } from "../../lib/announcements";
+import { useNotifications } from "../../lib/notifications";
 import AnnouncementModal from "../shared/AnnouncementModal";
 import BorrowerManagement from "./BorrowerManagement";
 import LoanRecords from "./LoanRecords";
@@ -204,6 +205,30 @@ export default function OrgDashboard({ user, onSignOut }) {
     setOpenedAnnouncement(a);
   }
 
+  // "A farmer sent a payment proof" alerts for this person (cooperative staff
+  // only ever get this one kind). They show in the bell; opening one marks it
+  // read and goes to Repayment Tracking, where the proof can be reviewed. The
+  // list is also checked again every minute while the page is open, so a new
+  // proof shows up without a refresh.
+  const notifications = useNotifications({ limit: 20 });
+  const proofAlerts = notifications.items.filter((n) => n.kind === "payment_proof_submitted");
+  const unreadProofAlerts = proofAlerts.filter((n) => n.unread).length;
+  const reloadNotifications = notifications.reload;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") reloadNotifications();
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [reloadNotifications]);
+  function handleOpenProofAlert(n) {
+    notifications.markRead(n.id);
+    setActiveItem("Repayment Tracking");
+  }
+  function handleBellOpened() {
+    announcements.reload();
+    notifications.reload();
+  }
+
   // Only a cooperative's owner or finance managers can send reminders; the
   // server enforces it too, this just hides buttons that would be refused.
   const canSendReminders = ["owner", "finance_manager"].includes(orgInfo.orgRole);
@@ -307,7 +332,10 @@ export default function OrgDashboard({ user, onSignOut }) {
             unreadAnnouncements={announcements.unreadCount}
             onOpenAnnouncement={handleOpenAnnouncement}
             onViewAllAnnouncements={() => setActiveItem("Announcements")}
-            onOpen={announcements.reload}
+            proofAlerts={proofAlerts}
+            unreadProofAlerts={unreadProofAlerts}
+            onOpenProofAlert={handleOpenProofAlert}
+            onOpen={handleBellOpened}
           />
         </div>
 

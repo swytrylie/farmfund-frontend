@@ -1,38 +1,24 @@
 import { useState, useEffect } from "react";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Eye } from "lucide-react";
 import { authedRequest } from "../../api";
-import { peso, round2, METHOD_LABEL, loanRef, personName, fetchAllPages, withBalanceAfter } from "../../lib/repaymentData";
+import {
+  peso,
+  round2,
+  METHOD_LABEL,
+  loanRef,
+  personName,
+  fetchAllPages,
+  withBalanceAfter,
+  sanitizeAmount,
+  displayAmount,
+  todayLocalISO,
+} from "../../lib/repaymentData";
+import { bytesText, messageFrom } from "../../lib/certificates";
+import { PROOF_METHOD_LABEL, STATUS_STYLE, listCooperativeProofs, verifyProof, rejectProof, openProofFile } from "../../lib/paymentProofs";
 
 const MAX_PAYMENT = 500000;
 const RECORDING_ROLES = ["owner", "finance_manager"];
 const PAGE_SIZE = 25;
-
-const todayLocalISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-
-// Keeps only what a money amount can contain as it's typed: digits and one
-// decimal point, at most 2 decimal places — so letters, symbols, and the
-// "1e9" scientific-notation trick can never get into the field at all.
-function sanitizeAmount(raw) {
-  let cleaned = raw.replace(/[^\d.]/g, "");
-  const firstDot = cleaned.indexOf(".");
-  if (firstDot !== -1) {
-    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
-  }
-  if (cleaned.startsWith(".")) cleaned = "0" + cleaned;
-  const [intPart, decPart] = cleaned.split(".");
-  const trimmedInt = intPart.replace(/^0+(?=\d)/, "");
-  return decPart === undefined ? trimmedInt : `${trimmedInt}.${decPart.slice(0, 2)}`;
-}
-
-function displayAmount(raw) {
-  if (raw === "") return "";
-  const [intPart, decPart] = raw.split(".");
-  const formattedInt = Number(intPart).toLocaleString("en-US");
-  return decPart === undefined ? formattedInt : `${formattedInt}.${decPart}`;
-}
 
 function Toast({ message, onClose }) {
   useEffect(() => {
@@ -203,6 +189,222 @@ function RecordPaymentModal({ loans, onSubmit, onCancel }) {
   );
 }
 
+const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+function ProofChip({ status }) {
+  const style = STATUS_STYLE[status] || STATUS_STYLE.pending;
+  const label = status === "pending" ? "Needs review" : style.label;
+  return <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${style.chip}`}>{label}</span>;
+}
+
+// One farmer's proof of payment, opened for a decision. Verifying records the
+// payment on the loan (the server does both together); rejecting needs a
+// reason, which the farmer sees.
+function ReviewProofModal({ proof, loan, onVerify, onReject, onCancel }) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const before = loan ? loan.remainingBalance : null;
+  const loanPayable = loan ? loan.status === "active" || loan.status === "defaulted" : true;
+  const overBalance = before !== null && proof.amount > before + 0.001;
+  const after = before === null ? null : Math.max(0, round2(before - proof.amount));
+  const noteOk = note.trim().length >= 3;
+  const verifyBlocked = !loanPayable || overBalance;
+
+  async function openFile() {
+    setError("");
+    try {
+      const opened = await openProofFile(proof.id);
+      if (!opened) setError("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+    } catch (err) {
+      setError(messageFrom(err, "The receipt could not be opened."));
+    }
+  }
+
+  async function run(kind, fn) {
+    setBusy(kind);
+    setError("");
+    try {
+      await fn(note);
+    } catch (err) {
+      setError(messageFrom(err, "Something went wrong. Please try again."));
+      setBusy("");
+    }
+  }
+
+  const rows = [
+    ["Farmer", proof.farmerName || "Unknown"],
+    ["Loan", loanRef(proof.loanId)],
+    ["Amount paid", peso(proof.amount)],
+    ["Method", PROOF_METHOD_LABEL[proof.method] || proof.method],
+    ["Date paid", fmtDate(proof.paymentDate)],
+    proof.referenceNumber ? ["Reference no.", proof.referenceNumber] : null,
+    ["Sent", fmtDate(proof.createdAt)],
+  ].filter(Boolean);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={busy ? undefined : onCancel}>
+      <div role="dialog" aria-label="Review payment proof" className="bg-white rounded-3xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <h3 className="text-xl font-bold text-gray-900">Review payment proof</h3>
+          <button onClick={onCancel} disabled={!!busy} className="text-gray-400 hover:text-gray-600" aria-label="Close dialog">
+            <X size={20} />
+          </button>
+        </div>
+
+        <dl className="mt-4 text-sm divide-y divide-gray-50">
+          {rows.map(([k, v]) => (
+            <div key={k} className="py-1.5 flex justify-between gap-4">
+              <dt className="text-gray-400">{k}</dt>
+              <dd className="font-semibold text-gray-900 text-right break-words min-w-0">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        {proof.note && (
+          <p className="mt-2 text-sm text-gray-600 bg-gray-50 rounded-xl px-3 py-2 break-words">
+            <span className="text-gray-400">Farmer's note: </span>
+            {proof.note}
+          </p>
+        )}
+
+        <button onClick={openFile} className="mt-4 w-full inline-flex items-center justify-center gap-2 border border-gray-300 rounded-xl py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          <Eye size={15} /> View receipt{proof.fileType ? ` (${proof.fileType.toUpperCase()}${proof.bytes ? `, ${bytesText(proof.bytes)}` : ""})` : ""}
+        </button>
+
+        {before !== null && (
+          <p className={`mt-3 text-xs rounded-xl px-3 py-2 ${verifyBlocked ? "bg-red-50 text-red-600" : "bg-gray-50 text-gray-600"}`}>
+            {!loanPayable
+              ? `This loan is ${loan.status.replace("_", " ")}, so a payment can't be recorded on it.`
+              : overBalance
+              ? `This is more than the remaining balance of ${peso(before)}. Reject it and ask the farmer to send the right amount.`
+              : `Balance goes from ${peso(before)} to ${peso(after)} when verified.`}
+          </p>
+        )}
+
+        <div className="mt-4">
+          <label htmlFor="rp-note" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
+            Note to the farmer <span className="normal-case font-normal">(needed to reject)</span>
+          </label>
+          <textarea
+            id="rp-note"
+            rows={2}
+            value={note}
+            maxLength={300}
+            onChange={(e) => setNote(e.target.value.replace(/[<>]/g, ""))}
+            className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full resize-none focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30"
+          />
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-2 text-xs text-red-500">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center justify-end gap-3">
+          <button
+            onClick={() => run("reject", (n) => onReject(proof, n))}
+            disabled={!!busy || !noteOk}
+            title={noteOk ? "" : "Write why you are rejecting it (at least 3 characters)"}
+            className="px-5 py-2.5 rounded-xl border border-red-300 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy === "reject" ? "Rejecting…" : "Reject"}
+          </button>
+          <button
+            onClick={() => run("verify", (n) => onVerify(proof, n))}
+            disabled={!!busy || verifyBlocked}
+            className="px-5 py-2.5 rounded-xl bg-[#4f7331] text-white hover:bg-[#3f6238] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy === "verify" ? "Recording…" : "Verify & record payment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The farmers' proofs of payment. Waiting ones come first and are the point of
+// the section; reviewed ones can be shown underneath.
+function ProofsSection({ proofs, pendingCount, reviewed, showReviewed, onToggleReviewed, reviewedError, onReview, onView }) {
+  const renderRow = (p, action) => (
+    <li key={p.id} className="border border-gray-100 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3" data-testid="proof-row">
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-gray-900">
+          {p.farmerName || "Unknown"} <span className="font-medium text-gray-400">{loanRef(p.loanId)}</span>
+        </p>
+        <p className="text-xs text-gray-500">
+          <span className="font-semibold text-green-700">{peso(p.amount)}</span> via {PROOF_METHOD_LABEL[p.method] || p.method} · paid {fmtDate(p.paymentDate)}
+          {p.referenceNumber ? ` · Ref ${p.referenceNumber}` : ""}
+        </p>
+        {p.status !== "pending" && (
+          <p className="text-xs text-gray-400 mt-0.5">
+            {p.status === "verified" ? "Verified" : "Rejected"}
+            {p.reviewedByName ? ` by ${p.reviewedByName}` : ""}
+            {p.reviewedAt ? ` · ${fmtDate(p.reviewedAt)}` : ""}
+            {p.reviewNote ? ` — ${p.reviewNote}` : ""}
+          </p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <ProofChip status={p.status} />
+        <button onClick={() => onView(p)} className="inline-flex items-center gap-1 text-xs text-[#4f7331] font-medium hover:underline">
+          <Eye size={13} /> Receipt
+        </button>
+        {action}
+      </div>
+    </li>
+  );
+
+  return (
+    <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm" data-testid="proofs-section">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-bold text-gray-900">
+          Payment Proofs from Farmers
+          {pendingCount > 0 && <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">{pendingCount} to review</span>}
+        </h3>
+        <button onClick={onToggleReviewed} className="text-xs text-[#4f7331] font-medium hover:underline">
+          {showReviewed ? "Hide reviewed" : "Show reviewed"}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-gray-400">Farmers upload a receipt after paying. A proof only counts once you verify it.</p>
+
+      {proofs.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">No proofs are waiting for review.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {proofs.map((p) => (
+            renderRow(
+              p,
+              <button onClick={() => onReview(p)} className="px-3 py-1.5 rounded-lg bg-[#4f7331] text-white text-xs font-medium hover:bg-[#3f6238]">
+                Review
+              </button>
+            )
+          ))}
+        </ul>
+      )}
+      {pendingCount > proofs.length && <p className="mt-2 text-xs text-gray-400">Showing the newest {proofs.length} of {pendingCount}.</p>}
+
+      {showReviewed && (
+        <div className="mt-5 pt-4 border-t border-gray-100">
+          <h4 className="text-sm font-bold text-gray-900">Reviewed proofs</h4>
+          {reviewedError ? (
+            <p className="mt-2 text-xs text-red-500">{reviewedError}</p>
+          ) : reviewed === null ? (
+            <p className="mt-2 text-xs text-gray-400">Loading…</p>
+          ) : reviewed.length === 0 ? (
+            <p className="mt-2 text-xs text-gray-400">Nothing has been reviewed yet.</p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {reviewed.map((p) => renderRow(p))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RepaymentTracking() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -213,14 +415,52 @@ export default function RepaymentTracking() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [proofs, setProofs] = useState([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [proofsError, setProofsError] = useState("");
+  const [reviewed, setReviewed] = useState(null);
+  const [reviewedError, setReviewedError] = useState("");
+  const [showReviewed, setShowReviewed] = useState(false);
+  const [reviewing, setReviewing] = useState(null);
 
-  async function loadData(coopId) {
+  async function loadProofs(coopId) {
+    try {
+      const r = await listCooperativeProofs(coopId, { status: "pending" });
+      setProofs(r.proofs || []);
+      setPendingCount(r.pendingCount || 0);
+      setProofsError("");
+    } catch (err) {
+      setProofsError(messageFrom(err, "Could not load the payment proofs."));
+    }
+  }
+
+  async function loadReviewed(coopId) {
+    try {
+      const [ok, no] = await Promise.all([
+        listCooperativeProofs(coopId, { status: "verified", limit: 50 }),
+        listCooperativeProofs(coopId, { status: "rejected", limit: 50 }),
+      ]);
+      const all = [...(ok.proofs || []), ...(no.proofs || [])].sort((a, b) => new Date(b.reviewedAt || b.createdAt) - new Date(a.reviewedAt || a.createdAt));
+      setReviewed(all);
+      setReviewedError("");
+    } catch (err) {
+      setReviewedError(messageFrom(err, "Could not load reviewed proofs."));
+    }
+  }
+
+  async function loadData(coopId, role = orgRole) {
     const [loansData, paymentsData] = await Promise.all([
       fetchAllPages("/api/loans"),
       fetchAllPages(`/api/loan-payments?cooperative=${coopId}`),
     ]);
     setLoans(loansData);
     setPayments(paymentsData);
+    // Only the owner and finance managers may see proofs; for anyone else the
+    // server would refuse, so they are not asked.
+    if (RECORDING_ROLES.includes(role)) {
+      await loadProofs(coopId);
+      if (showReviewed) await loadReviewed(coopId);
+    }
   }
 
   useEffect(() => {
@@ -238,7 +478,7 @@ export default function RepaymentTracking() {
         }
         setCooperativeId(me.cooperativeId);
         setOrgRole(me.orgRole);
-        await loadData(me.cooperativeId);
+        await loadData(me.cooperativeId, me.orgRole);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || "Failed to load your data.");
       } finally {
@@ -261,6 +501,46 @@ export default function RepaymentTracking() {
       await loadData(cooperativeId);
     } catch (err) {
       setLoadError(err.message || "The payment was saved, but the list couldn't be refreshed.");
+    }
+  }
+
+  async function handleVerify(proof, note) {
+    await verifyProof(proof.id, note);
+    setReviewing(null);
+    setToastMessage("Payment verified and recorded");
+    try {
+      await loadData(cooperativeId);
+    } catch (err) {
+      setLoadError(err.message || "The payment was recorded, but the list couldn't be refreshed.");
+    }
+  }
+
+  async function handleReject(proof, note) {
+    await rejectProof(proof.id, note);
+    setReviewing(null);
+    setToastMessage("Payment proof rejected");
+    try {
+      await loadData(cooperativeId);
+    } catch (err) {
+      setLoadError(err.message || "The proof was rejected, but the list couldn't be refreshed.");
+    }
+  }
+
+  async function handleView(proof) {
+    try {
+      const opened = await openProofFile(proof.id);
+      if (!opened) setProofsError("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+    } catch (err) {
+      setProofsError(messageFrom(err, "The receipt could not be opened."));
+    }
+  }
+
+  function handleToggleReviewed() {
+    const next = !showReviewed;
+    setShowReviewed(next);
+    if (next) {
+      setReviewed(null);
+      loadReviewed(cooperativeId);
     }
   }
 
@@ -323,11 +603,26 @@ export default function RepaymentTracking() {
         <p className="mt-4 text-xs text-gray-400">Only your cooperative's owner or finance managers can record payments.</p>
       )}
 
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className={`mt-6 grid grid-cols-1 sm:grid-cols-3 ${canRecord ? "lg:grid-cols-4" : ""} gap-4`}>
+        {canRecord && <KPICard label="PROOFS TO REVIEW" value={pendingCount} valueColor={pendingCount > 0 ? "text-amber-600" : "text-gray-900"} />}
         <KPICard label="COLLECTED THIS MONTH" value={peso(collectedThisMonth)} valueColor="text-[#4f7331]" />
         <KPICard label="TOTAL COLLECTED" value={peso(totalCollected)} valueColor="text-[#be8238]" />
         <KPICard label="OUTSTANDING BALANCE" value={peso(outstanding)} valueColor="text-[#a0522d]" />
       </div>
+
+      {canRecord && proofsError && <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-600">{proofsError}</div>}
+      {canRecord && (
+        <ProofsSection
+          proofs={proofs}
+          pendingCount={pendingCount}
+          reviewed={reviewed}
+          showReviewed={showReviewed}
+          onToggleReviewed={handleToggleReviewed}
+          reviewedError={reviewedError}
+          onReview={setReviewing}
+          onView={handleView}
+        />
+      )}
 
       <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
         <h3 className="font-bold text-gray-900 mb-4">Recently Recorded</h3>
@@ -378,6 +673,15 @@ export default function RepaymentTracking() {
         )}
       </div>
 
+      {reviewing && (
+        <ReviewProofModal
+          proof={reviewing}
+          loan={loansById.get(String(reviewing.loanId))}
+          onVerify={handleVerify}
+          onReject={handleReject}
+          onCancel={() => setReviewing(null)}
+        />
+      )}
       {isModalOpen && <RecordPaymentModal loans={loans} onSubmit={handleRecord} onCancel={() => setIsModalOpen(false)} />}
       {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage("")} />}
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, CheckCircle2, AlertCircle, Megaphone } from "lucide-react";
+import { Bell, CheckCircle2, AlertCircle, Megaphone, ReceiptText } from "lucide-react";
 import { personName } from "../../lib/repaymentData";
 import { REMINDER_TYPE_LABEL } from "../../lib/reminderData";
 import { formatAnnouncementDate } from "../../lib/announcements";
@@ -37,6 +37,9 @@ export default function ReminderBell({
   unreadAnnouncements = 0,
   onOpenAnnouncement,
   onViewAllAnnouncements,
+  proofAlerts = [],
+  unreadProofAlerts = 0,
+  onOpenProofAlert,
   onOpen,
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -45,7 +48,13 @@ export default function ReminderBell({
   const recentReminders = [...reminders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
   const recentAnnouncements = announcements.slice(0, 3);
   const needsAttention = recentReminders.some((r) => r.status === "failed");
-  const showDot = needsAttention || unreadAnnouncements > 0;
+  const recentProofAlerts = proofAlerts.slice(0, 4);
+  const showDot = needsAttention || unreadProofAlerts > 0 || unreadAnnouncements > 0;
+  const dotTitle = needsAttention
+    ? "A recent reminder failed to send"
+    : unreadProofAlerts > 0
+    ? "A farmer sent a payment proof to review"
+    : "You have unread announcements";
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -73,6 +82,11 @@ export default function ReminderBell({
     onViewAllAnnouncements?.();
   }
 
+  function handleOpenProofAlert(n) {
+    setIsOpen(false);
+    onOpenProofAlert?.(n);
+  }
+
   function handleOpenAnnouncement(a) {
     setIsOpen(false);
     onOpenAnnouncement?.(a);
@@ -84,8 +98,8 @@ export default function ReminderBell({
         <Bell className="w-6 h-6 text-slate-800 cursor-pointer hover:text-emerald-700 transition-colors" />
         {showDot && (
           <span
-            data-testid={needsAttention ? "failed-dot" : "unread-dot"}
-            title={needsAttention ? "A recent reminder failed to send" : "You have unread announcements"}
+            data-testid={needsAttention ? "failed-dot" : unreadProofAlerts > 0 ? "proof-dot" : "unread-dot"}
+            title={dotTitle}
             className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white"
           />
         )}
@@ -96,7 +110,41 @@ export default function ReminderBell({
           <div className="bg-[#2d4027] p-4 text-white font-bold text-base">Notifications</div>
 
           <div className="max-h-[26rem] overflow-y-auto">
-            <p className="px-4 pt-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Announcements</p>
+            <p className="px-4 pt-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Payment Proofs</p>
+            <div className="px-3 py-2 space-y-1.5">
+              {recentProofAlerts.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No payment proofs yet.</p>
+              ) : (
+                recentProofAlerts.map((n) => (
+                  <div
+                    key={n.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open payment proof from ${n.details?.farmerName || "a farmer"}`}
+                    onClick={() => handleOpenProofAlert(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleOpenProofAlert(n);
+                      }
+                    }}
+                    className="relative flex items-start gap-2.5 rounded-xl p-2.5 cursor-pointer bg-[#fff8ec] hover:bg-[#fff1d9] transition-colors"
+                  >
+                    {n.unread && <span className="absolute top-3 left-1 w-2 h-2 rounded-full bg-amber-500" />}
+                    <span className="shrink-0 ml-2 p-1.5 rounded-lg bg-[#fde8c4] text-[#8a5a12]">
+                      <ReceiptText size={14} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{n.title}</p>
+                      <p className="text-xs text-gray-500 line-clamp-2">{n.message}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{formatAnnouncementDate(n.at)}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <p className="px-4 pt-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider border-t border-gray-100">Announcements</p>
             <div className="px-3 py-2 space-y-1.5">
               {recentAnnouncements.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">No announcements yet.</p>
