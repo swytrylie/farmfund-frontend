@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
-import { Lock, X, RefreshCw } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Lock, X, RefreshCw, Check, Circle } from "lucide-react";
 import FormInput from "./FormInput";
 import { getPasswordStrength, generateStrongPassword } from "../../lib/passwordStrength";
+import { passwordChecks } from "../../lib/signupValidation";
+import { runAfterPointerRelease } from "../../lib/afterPointer";
 
 const LEVEL_STYLES = {
   1: { bar: "bg-red-500", text: "text-red-300" },
@@ -9,9 +11,10 @@ const LEVEL_STYLES = {
   3: { bar: "bg-emerald-400", text: "text-emerald-300" },
 };
 
-// Small dark tooltip under the field: a one-line strength meter, and the
-// suggested password underneath. Hover the strength line for tips on how to
-// improve the password.
+// Small dark tooltip under the field: a live checklist of what the password
+// needs (each line ticks green the moment it is met), a one-line strength
+// meter, and the suggested password underneath. Hover the strength line for
+// tips on how to improve the password.
 function PasswordStrengthPopover({ password, suggestion, compact, onRefresh, onUse, onDismiss }) {
   // Fade + drop in on mount
   const [entered, setEntered] = useState(false);
@@ -22,6 +25,7 @@ function PasswordStrengthPopover({ password, suggestion, compact, onRefresh, onU
 
   const strength = getPasswordStrength(password);
   const styles = LEVEL_STYLES[strength.level];
+  const checks = passwordChecks(password);
 
   return (
     <div
@@ -59,6 +63,23 @@ function PasswordStrengthPopover({ password, suggestion, compact, onRefresh, onU
           <X size={14} />
         </button>
       </div>
+
+      {/* What the password needs — ticks as each rule is met */}
+      <ul
+        className={`mt-2 grid gap-x-3 gap-y-1 ${compact ? "grid-cols-1" : "grid-cols-2"}`}
+        aria-label="Password requirements"
+      >
+        {checks.map((check) => (
+          <li
+            key={check.id}
+            data-met={check.met ? "true" : "false"}
+            className={`flex items-center gap-1.5 ${check.met ? "text-emerald-300" : "text-white/60"}`}
+          >
+            {check.met ? <Check size={12} className="shrink-0" /> : <Circle size={10} className="shrink-0" />}
+            <span>{check.label}</span>
+          </li>
+        ))}
+      </ul>
 
       {/* Suggested strong password */}
       <button
@@ -113,9 +134,15 @@ export default function PasswordStrengthField({
   onToggleVisible,
   compact = false,
   onUseSuggested,
+  id,
+  success = false,
+  onBlur, // called when focus leaves the field AND its tips card
 }) {
   const [open, setOpen] = useState(false);
   const [suggestion, setSuggestion] = useState(() => generateStrongPassword());
+  // Bumped on every focus/blur so a close that was postponed (see onBlur
+  // below) is dropped if the person has come back to the field since.
+  const closeToken = useRef(0);
 
   function handleUse() {
     onUseSuggested(suggestion);
@@ -127,10 +154,23 @@ export default function PasswordStrengthField({
     <div
       onBlur={(e) => {
         // Only close when focus leaves the whole field + card
-        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+          // Clicking something BELOW the card (Submit, the consent box) moves
+          // focus on mouse-DOWN; folding the card away right then would slide
+          // that button upward before the mouse is released, and the click
+          // would miss. So with a pointer held down, closing waits until it is
+          // let go (tabbing away closes at once).
+          const token = ++closeToken.current;
+          runAfterPointerRelease(() => {
+            if (closeToken.current === token) setOpen(false);
+          });
+          onBlur?.();
+        }
       }}
     >
       <FormInput
+        id={id}
+        success={success}
         icon={icon}
         placeholder={placeholder}
         value={value}
@@ -140,7 +180,10 @@ export default function PasswordStrengthField({
         visible={visible}
         onToggleVisible={onToggleVisible}
         compact={compact}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          closeToken.current++;
+          setOpen(true);
+        }}
         autoComplete="new-password"
         capsLockWarning
       />

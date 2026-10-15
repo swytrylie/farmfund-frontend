@@ -13,6 +13,14 @@ import { Eye, EyeOff, AlertTriangle } from "lucide-react";
 //              onChange={update("password")} error={errors.password}
 //              showToggle visible={showPassword} onToggleVisible={() => setShowPassword(p => !p)}
 //              capsLockWarning autoComplete="current-password" />
+//
+// Optional extras (used by the sign-up form):
+//   id        — set on the <input> so a <label htmlFor> and focus-the-first-
+//               problem can find it
+//   success   — green border: the field is filled in and valid
+//   hint      — small neutral text under the field while there is no error
+// The error text is announced politely by screen readers as it changes, and
+// the input is marked aria-invalid while it shows.
 
 // Browsers paint autofilled fields with their own yellow/blue background.
 // These classes repaint it white so autofilled inputs match the normal ones
@@ -53,6 +61,10 @@ export default function FormInput({
   onBlur,
   autoComplete,
   capsLockWarning = false, // show a "Caps Lock is ON" pill under the field
+  id,
+  success = false,
+  hint,
+  inputMode, // e.g. "numeric" to bring up the number keypad on phones
 }) {
   const [capsLockOn, setCapsLockOn] = useState(false);
 
@@ -62,6 +74,12 @@ export default function FormInput({
       ? EXTENSION_IGNORE_ATTRS
       : {};
   const iconSize = compact ? 18 : 20;
+  const messageId = id ? `${id}-message` : undefined;
+  const borderClass = error
+    ? "border-red-400"
+    : success
+    ? "border-emerald-400"
+    : "border-white/40";
 
   const leftPadding = Icon ? (compact ? "pl-11" : "pl-12") : "pl-4";
   const rightPadding = showToggle ? (compact ? "pr-10" : "pr-12") : "pr-4";
@@ -90,7 +108,9 @@ export default function FormInput({
         )}
 
         <input
+          id={id}
           type={inputType}
+          inputMode={inputMode}
           placeholder={placeholder}
           value={value}
           onChange={onChange}
@@ -99,10 +119,10 @@ export default function FormInput({
           onKeyDown={handleKey}
           onKeyUp={handleKey}
           autoComplete={autoComplete}
+          aria-invalid={error ? "true" : undefined}
+          aria-describedby={error || hint ? messageId : undefined}
           {...extensionAttrs}
-          className={`w-full py-3.5 rounded-lg bg-white border ${
-            error ? "border-red-400" : "border-white/40"
-          } ${
+          className={`w-full py-3.5 rounded-lg bg-white border ${borderClass} ${
             compact ? "text-sm" : "text-base"
           } text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#42BD41] focus:border-transparent ${leftPadding} ${rightPadding} ${AUTOFILL_CLASSES}`}
         />
@@ -126,7 +146,18 @@ export default function FormInput({
         </p>
       )}
 
-      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+      {/* aria-live so a message that appears or changes while typing is read out */}
+      <div aria-live="polite">
+        {error ? (
+          <p id={messageId} className="mt-1 text-xs text-red-300">
+            {error}
+          </p>
+        ) : hint ? (
+          <p id={messageId} className="mt-1 text-xs text-white/70">
+            {hint}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

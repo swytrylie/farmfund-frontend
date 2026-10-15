@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { User, Building2, Info } from "lucide-react";
 import FormInput from "./FormInput";
 import PasswordStrengthField from "./PasswordStrengthField";
+import TermsModal from "./TermsModal";
 import {
-  validateSignupForm,
-  validateOrganizationSignupForm,
-} from "../../lib/validation";
+  FIELD_ORDER,
+  getLiveErrors,
+  getAllErrors,
+  consentFinal,
+  filterContactInput,
+  contactNote,
+  filterDateInput,
+  dateNote,
+} from "../../lib/signupValidation";
+import { TERMS_VERSION } from "../../lib/terms";
+import { runAfterPointerRelease } from "../../lib/afterPointer";
 import { apiRequest } from "../../api";
+
+// How long a "that character was removed" note stays on screen.
+const NOTE_MS = 4000;
 
 const ROLE_OPTIONS = [
   {
@@ -24,9 +36,9 @@ const ROLE_OPTIONS = [
 ];
 
 // Small uppercase label used above every field on this form
-function FieldLabel({ children }) {
+function FieldLabel({ children, htmlFor }) {
   return (
-    <label className="text-xs font-bold text-white uppercase tracking-wider mb-1 block">
+    <label htmlFor={htmlFor} className="text-xs font-bold text-white uppercase tracking-wider mb-1 block">
       {children}
     </label>
   );
@@ -50,11 +62,27 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     dateEstablished: "",
     orgContact: "",
   });
-  const [errors, setErrors] = useState({});
+  // How feedback works (rules live in lib/signupValidation.js):
+  //  - LIVE problems ("that character isn't allowed") show at once, as you type.
+  //  - Everything else ("required", "incomplete") shows once you leave the
+  //    field (touched), or for every field after Submit (submitted).
+  // Nothing is stored as an error: it is worked out from the current values on
+  // every render, so a message always matches what is in the box right now.
+  const [touched, setTouched] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  // Short-lived notes about text that was dropped as it was typed or pasted
+  // (letters in the contact number, for instance). A note stays for a few
+  // seconds — long enough to read while still typing — or until the person
+  // leaves that field.
+  const [notes, setNotes] = useState({});
+  const noteTimers = useRef({});
+  const [accepted, setAccepted] = useState(false);
+  const [consentTouched, setConsentTouched] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
-    const [serverError, setServerError] = useState("");
+  const [serverError, setServerError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Shown after a successful register() call — register() no longer logs
@@ -69,57 +97,111 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
   const [resending, setResending] = useState(false);
   const [pendingOrgName, setPendingOrgName] = useState(null);
 
-   const update = (field) => (e) => {
+  const liveErrors = getLiveErrors(data, selectedRole);
+  const allErrors = getAllErrors(data, selectedRole);
+  const consentError = consentFinal(accepted);
+
+  // What to show under a field right now.
+  const errorFor = (field) =>
+    liveErrors[field] || notes[field] || (submitted || touched[field] ? allErrors[field] : undefined);
+  // Filled in and valid -> green border.
+  const isGood = (field) => !!data[field] && !allErrors[field];
+  // Leaving a field reveals its "required / incomplete" message. If the person
+  // left it by pressing something (Submit, the consent box), the message waits
+  // until the press is finished so the page doesn't shift under their click.
+  const touch = (field) => () =>
+    runAfterPointerRelease(() => {
+      clearNote(field);
+      setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+    });
+  const idFor = (field) => `signup-${field}`;
+
+  useEffect(() => {
+    const timers = noteTimers.current;
+    return () => Object.values(timers).forEach(clearTimeout);
+  }, []);
+
+  const clearNote = (field) => {
+    clearTimeout(noteTimers.current[field]);
+    setNotes((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  };
+  const showNote = (field, message) => {
+    clearTimeout(noteTimers.current[field]);
+    setNotes((prev) => ({ ...prev, [field]: message }));
+    noteTimers.current[field] = setTimeout(() => clearNote(field), NOTE_MS);
+  };
+
+  const update = (field) => (e) => {
     const value = e.target.value;
     setData((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: undefined }));
     setServerError("");
   };
 
-  // Organization contact number: digits only, no letters/symbols/minus signs,
-  // capped at 11 characters (standard PH mobile number length).
+  // Organization contact number: digits only, up to 11. Anything else that is
+  // typed or pasted is dropped AND the person is told so straight away.
   const updateOrgContact = (e) => {
-    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 11);
-    setData((prev) => ({ ...prev, orgContact: digitsOnly }));
-    setErrors((prev) => ({ ...prev, orgContact: undefined }));
+    const result = filterContactInput(e.target.value);
+    setData((prev) => ({ ...prev, orgContact: result.value }));
+    const note = contactNote(result);
+    if (note) showNote("orgContact", note);
+    setServerError("");
   };
 
-  // Date Established: digits only, dashes inserted automatically as you
-  // type (2015062 0 → 2015-06-20) — letters simply can't be typed in at
-  // all, since anything non-numeric is stripped before it ever reaches state.
+  // Date Established: digits only, dashes put in for you (20150620 ->
+  // 2015-06-20). Other characters are dropped and the person is told.
   const updateDateEstablished = (e) => {
-    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 8); // YYYYMMDD
-    let formatted = digitsOnly;
-    if (digitsOnly.length > 4) {
-      formatted = `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
-    }
-    if (digitsOnly.length > 6) {
-      formatted = `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4, 6)}-${digitsOnly.slice(6)}`;
-    }
-    setData((prev) => ({ ...prev, dateEstablished: formatted }));
-    setErrors((prev) => ({ ...prev, dateEstablished: undefined }));
+    const result = filterDateInput(e.target.value);
+    setData((prev) => ({ ...prev, dateEstablished: result.value }));
+    const note = dateNote(result);
+    if (note) showNote("dateEstablished", note);
+    setServerError("");
   };
 
   // "Use suggested strong password": fills Password AND Confirm Password, and
   // reveals both so the person can actually see and save what was generated.
   const handleUseSuggested = (generated) => {
     setData((prev) => ({ ...prev, password: generated, confirmPassword: generated }));
-    setErrors((prev) => ({ ...prev, password: undefined, confirmPassword: undefined }));
     setServerError("");
     setShowPassword(true);
     setShowConfirmPassword(true);
   };
 
-    async function handleSubmit(e) {
+  const chooseRole = (role) => {
+    setSelectedRole(role);
+    Object.keys(noteTimers.current).forEach(clearNote);
+    setServerError("");
+  };
+
+  const toggleConsent = (e) => {
+    setAccepted(e.target.checked);
+    setConsentTouched(true);
+    setServerError("");
+  };
+
+  const agreeFromModal = () => {
+    setAccepted(true);
+    setConsentTouched(true);
+    setTermsOpen(false);
+  };
+
+
+  async function handleSubmit(e) {
     e.preventDefault();
     if (loading) return;
 
-    const validationErrors = isOrganization
-      ? validateOrganizationSignupForm(data)
-      : validateSignupForm(data);
-    setErrors(validationErrors);
+    setSubmitted(true);
+    setConsentTouched(true);
     setServerError("");
-    if (Object.keys(validationErrors).length > 0) return;
+
+    // Stop at the first problem and put the cursor there. The consent box
+    // counts: without it the account cannot be created.
+    const firstProblem = FIELD_ORDER[selectedRole].find((field) =>
+      field === "acceptedTerms" ? consentError : allErrors[field]
+    );
+    if (firstProblem) {
+      document.getElementById(idFor(firstProblem))?.focus();
+      return;
+    }
 
     setLoading(true);
     try {
@@ -138,6 +220,9 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
             email: data.email.trim(),
             password: data.password,
             orgName: data.orgName.trim(),
+            phone: data.orgContact,
+            acceptedTerms: true,
+            termsVersion: TERMS_VERSION,
           },
         });
         setPendingOrgName(registerResult.cooperative?.name);
@@ -152,6 +237,8 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
           lastName: data.lastName.trim(),
           email: data.email.trim(),
           password: data.password,
+          acceptedTerms: true,
+          termsVersion: TERMS_VERSION,
         },
       });
       setAwaitingVerification(true);
@@ -218,6 +305,67 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
     }
   }
 
+  const consentShown = submitted || consentTouched ? consentError : null;
+  const hasProblems = Object.keys(allErrors).length > 0 || !!consentError;
+
+  // One labelled text box wired to the live/final feedback above.
+  const textField = (field, label, props = {}) => (
+    <div>
+      <FieldLabel htmlFor={idFor(field)}>{label}</FieldLabel>
+      <FormInput
+        id={idFor(field)}
+        value={data[field]}
+        onChange={update(field)}
+        onBlur={touch(field)}
+        error={errorFor(field)}
+        success={isGood(field)}
+        compact
+        {...props}
+      />
+    </div>
+  );
+
+  const passwordField = (compact) => (
+    <div>
+      <FieldLabel htmlFor={idFor("password")}>Create Password</FieldLabel>
+      <PasswordStrengthField
+        id={idFor("password")}
+        placeholder="Create a password"
+        value={data.password}
+        onChange={update("password")}
+        onBlur={touch("password")}
+        error={errorFor("password")}
+        success={isGood("password")}
+        visible={showPassword}
+        onToggleVisible={() => setShowPassword((p) => !p)}
+        onUseSuggested={handleUseSuggested}
+        compact={compact}
+      />
+    </div>
+  );
+
+  const confirmMatches = !!data.confirmPassword && !allErrors.confirmPassword;
+  const confirmField = (compact) => (
+    <div>
+      <FieldLabel htmlFor={idFor("confirmPassword")}>Confirm Password</FieldLabel>
+      <FormInput
+        id={idFor("confirmPassword")}
+        placeholder="Re-enter your password"
+        value={data.confirmPassword}
+        onChange={update("confirmPassword")}
+        onBlur={touch("confirmPassword")}
+        error={errorFor("confirmPassword")}
+        success={confirmMatches}
+        hint={confirmMatches ? "Passwords match." : undefined}
+        showToggle
+        visible={showConfirmPassword}
+        onToggleVisible={() => setShowConfirmPassword((p) => !p)}
+        autoComplete="new-password"
+        compact={compact}
+      />
+    </div>
+  );
+
   if (awaitingVerification) {
     return (
       <>
@@ -281,7 +429,7 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
             <button
               key={value}
               type="button"
-              onClick={() => setSelectedRole(value)}
+              onClick={() => chooseRole(value)}
               className={`rounded-xl p-4 text-center transition ${
                 isSelected ? "bg-[#e2f7e2]" : "bg-white hover:shadow-lg"
               }`}
@@ -300,104 +448,48 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
         {isOrganization ? (
           <>
             {/* Organization name */}
-            <div>
-              <FieldLabel>Organization Name</FieldLabel>
-              <FormInput
-                placeholder="e.g., Kasama Farmers Association"
-                value={data.orgName}
-                onChange={update("orgName")}
-                error={errors.orgName}
-                compact
-              />
-            </div>
+            {textField("orgName", "Organization Name", {
+              placeholder: "e.g., Kasama Farmers Association",
+            })}
 
             {/* Registration No. / Date Established */}
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Registration No.</FieldLabel>
-                <FormInput
-                  placeholder="e.g., CDA-2015-00812)"
-                  value={data.registrationNo}
-                  onChange={update("registrationNo")}
-                  error={errors.registrationNo}
-                  compact
-                />
-              </div>
-              <div>
-                <FieldLabel>Date Established</FieldLabel>
-                <FormInput
-                  placeholder="YYYY-MM-DD"
-                  value={data.dateEstablished}
-                  onChange={updateDateEstablished}
-                  error={errors.dateEstablished}
-                  compact
-                />
-              </div>
+              {textField("registrationNo", "Registration No.", {
+                placeholder: "e.g., CDA-2015-00812",
+              })}
+              {textField("dateEstablished", "Date Established", {
+                placeholder: "YYYY-MM-DD",
+                onChange: updateDateEstablished,
+                inputMode: "numeric",
+                hint: "Numbers only — dashes are added for you.",
+              })}
             </div>
 
             {/* Organization contact info */}
-            <div>
-              <FieldLabel>Organization Contact Info</FieldLabel>
-              <FormInput
-                type="tel"
-                placeholder="e.g., +63 9XX XXX XXXX"
-                value={data.orgContact}
-                onChange={updateOrgContact}
-                error={errors.orgContact}
-                compact
-              />
-            </div>
+            {textField("orgContact", "Organization Contact Info", {
+              type: "tel",
+              placeholder: "e.g., 09171234567",
+              onChange: updateOrgContact,
+              hint: "11 digits, numbers only.",
+            })}
 
             {/* Last name / First name */}
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Last Name</FieldLabel>
-                <FormInput
-                  placeholder="e.g., Lauron"
-                  value={data.lastName}
-                  onChange={update("lastName")}
-                  error={errors.lastName}
-                  compact
-                />
-              </div>
-              <div>
-                <FieldLabel>First Name</FieldLabel>
-                <FormInput
-                  placeholder="e.g., Nelmar"
-                  value={data.firstName}
-                  onChange={update("firstName")}
-                  error={errors.firstName}
-                  compact
-                />
-              </div>
+              {textField("lastName", "Last Name", { placeholder: "e.g., Lauron" })}
+              {textField("firstName", "First Name", { placeholder: "e.g., Nelmar" })}
             </div>
 
-            {/* Email / Create password */}
+            {/* Email */}
+            {textField("email", "Email Address", {
+              type: "email",
+              placeholder: "e.g., owner@kfacoop.ph",
+              autoComplete: "email",
+            })}
+
+            {/* Password / Confirm password */}
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Email Address</FieldLabel>
-                <FormInput
-                  type="email"
-                  placeholder="e.g., owner@kfacoop.ph"
-                  value={data.email}
-                  onChange={update("email")}
-                  error={errors.email}
-                  compact
-                />
-              </div>
-              <div>
-                <FieldLabel>Create Password</FieldLabel>
-                <PasswordStrengthField
-                  placeholder="Create a password"
-                  value={data.password}
-                  onChange={update("password")}
-                  error={errors.password}
-                  visible={showPassword}
-                  onToggleVisible={() => setShowPassword((p) => !p)}
-                  onUseSuggested={handleUseSuggested}
-                  compact
-                />
-              </div>
+              {passwordField(true)}
+              {confirmField(true)}
             </div>
 
             {/* Info banner */}
@@ -414,83 +506,75 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
           <>
             {/* Last name / First name */}
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Last Name</FieldLabel>
-                <FormInput
-                  placeholder="e.g., Lauron"
-                  value={data.lastName}
-                  onChange={update("lastName")}
-                  error={errors.lastName}
-                  compact
-                />
-              </div>
-              <div>
-                <FieldLabel>First Name</FieldLabel>
-                <FormInput
-                  placeholder="e.g., Nelmar"
-                  value={data.firstName}
-                  onChange={update("firstName")}
-                  error={errors.firstName}
-                  compact
-                />
-              </div>
+              {textField("lastName", "Last Name", { placeholder: "e.g., Lauron" })}
+              {textField("firstName", "First Name", { placeholder: "e.g., Nelmar" })}
             </div>
 
             {/* Middle name / Email */}
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Middle Name (Optional)</FieldLabel>
-                <FormInput
-                  placeholder="e.g., Lauron"
-                  value={data.middleName}
-                  onChange={update("middleName")}
-                  compact
-                />
-              </div>
-              <div>
-                <FieldLabel>Email Address</FieldLabel>
-                <FormInput
-                  type="email"
-                  placeholder="e.g., owner@kfacoop.ph"
-                  value={data.email}
-                  onChange={update("email")}
-                  error={errors.email}
-                  compact
-                />
-              </div>
+              {textField("middleName", "Middle Name (Optional)", { placeholder: "e.g., Lauron" })}
+              {textField("email", "Email Address", {
+                type: "email",
+                placeholder: "e.g., owner@kfacoop.ph",
+                autoComplete: "email",
+              })}
             </div>
 
             {/* Password */}
-            <div>
-              <FieldLabel>Create Password</FieldLabel>
-              <PasswordStrengthField
-                placeholder="Create a password"
-                value={data.password}
-                onChange={update("password")}
-                error={errors.password}
-                visible={showPassword}
-                onToggleVisible={() => setShowPassword((p) => !p)}
-                onUseSuggested={handleUseSuggested}
-              />
-            </div>
+            {passwordField(false)}
 
             {/* Confirm password */}
-            <div>
-              <FieldLabel>Confirm Password</FieldLabel>
-              <FormInput
-                placeholder="Create a password"
-                value={data.confirmPassword}
-                onChange={update("confirmPassword")}
-                error={errors.confirmPassword}
-                showToggle
-                visible={showConfirmPassword}
-                onToggleVisible={() => setShowConfirmPassword((p) => !p)}
-              />
-            </div>
+            {confirmField(false)}
           </>
         )}
 
-           {serverError && (
+        {/* Consent: the account cannot be created until this is ticked */}
+        <div>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              id={idFor("acceptedTerms")}
+              type="checkbox"
+              checked={accepted}
+              onChange={toggleConsent}
+              aria-invalid={consentShown ? "true" : undefined}
+              aria-describedby={consentShown ? "signup-acceptedTerms-message" : undefined}
+              className={`mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-[#5bc252] ${
+                consentShown ? "outline outline-2 outline-offset-2 outline-red-400" : ""
+              }`}
+            />
+            <span className="text-sm leading-snug text-white/90">
+              I have read and agree to the{" "}
+              <button
+                type="button"
+                onClick={(e) => {
+                  // Opens the terms; must not also tick the box it sits inside.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTermsOpen(true);
+                }}
+                className="font-bold text-white underline hover:text-[#8fe28f]"
+              >
+                Terms and Conditions
+              </button>
+              , and I consent to FarmFund collecting and using my personal data as described there.
+            </span>
+          </label>
+          <div aria-live="polite">
+            {consentShown && (
+              <p id="signup-acceptedTerms-message" className="mt-1.5 text-xs text-red-300">
+                {consentShown}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {submitted && hasProblems && (
+          <p className="text-sm text-red-300 text-center">
+            Please fix the highlighted fields before continuing.
+          </p>
+        )}
+
+        {serverError && (
           <p className="text-sm text-red-300 text-center">{serverError}</p>
         )}
 
@@ -506,6 +590,8 @@ export default function SignupForm({ onSwitchMode, initialRole }) {
           {loading ? "Creating account…" : "Submit"}
         </button>
       </form>
+
+      {termsOpen && <TermsModal onClose={() => setTermsOpen(false)} onAgree={agreeFromModal} />}
 
       <p className="mt-4 text-center text-white/90">
         Already have an account?{" "}
