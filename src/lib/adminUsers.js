@@ -49,7 +49,7 @@ export function formatDateTime(iso) {
 // Loads one page of people, with search (waits 300 ms after typing stops),
 // a page number, and "ignore answers that arrive late" so a slow old request
 // can never overwrite a newer one.
-export function useAdminUserList({ type = "all", status = "all", limit = 20, onUnauthorized } = {}) {
+export function useAdminUserList({ type = "all", status = "all", limit = 20, enabled = true, onUnauthorized } = {}) {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -83,6 +83,12 @@ export function useAdminUserList({ type = "all", status = "all", limit = 20, onU
   const load = useCallback(
     async ({ quiet = false } = {}) => {
       const id = ++latest.current;
+      // Switched off (the page is showing something else): send nothing, and
+      // ignore any answer still on its way.
+      if (!enabled) {
+        setLoading(false);
+        return;
+      }
       if (!quiet) setLoading(true);
       setError("");
       try {
@@ -101,7 +107,7 @@ export function useAdminUserList({ type = "all", status = "all", limit = 20, onU
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [debouncedSearch, type, status, page, limit]
+    [debouncedSearch, type, status, page, limit, enabled]
   );
 
   useEffect(() => {

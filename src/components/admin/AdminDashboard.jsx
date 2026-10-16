@@ -8,6 +8,7 @@ import {
   ClipboardList,
   BarChart3,
   Megaphone,
+  ShieldCheck,
   FileClock,
   DatabaseBackup,
   Archive,
@@ -28,6 +29,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { authedRequest } from "../../api";
+import { useNotifications } from "../../lib/notifications";
 import UserManagement from "./UserManagement";
 import FarmManagement from "./FarmManagement";
 import UserActivityMonitoring from "./UserActivityMonitoring";
@@ -313,7 +315,7 @@ function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
   );
 }
 
-function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement }) {
+function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpened }) {
   const [isOpen, setIsOpen] = useState(false);
   // Tracked separately from the real announcements data — dismissing a
   // card here only hides it from THIS popup. The actual sent-announcement
@@ -324,7 +326,8 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll, onOpenA
 
   const visibleAnnouncements = announcements.filter((a) => !dismissedIds.has(a.id));
   const recentAnnouncements = visibleAnnouncements.slice(0, 5);
-  const hasUnread = visibleAnnouncements.some((a) => a.unread);
+  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread);
+  const recentCertAlerts = certAlerts.slice(0, 5);
 
   function handleDismiss(id) {
     setDismissedIds((prev) => new Set(prev).add(id));
@@ -341,9 +344,23 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll, onOpenA
     onOpenAnnouncement(a);
   }
 
+  function handleOpenCert(n) {
+    setIsOpen(false);
+    onOpenCertAlert(n);
+  }
+
   return (
     <div className="relative">
-      <button onClick={() => setIsOpen((o) => !o)} className="relative" aria-label="Notifications">
+      <button
+        onClick={() => {
+          // Opening the bell asks for the newest alerts, so a certificate a
+          // farmer just sent shows up without reloading the page.
+          if (!isOpen) onOpened?.();
+          setIsOpen((o) => !o);
+        }}
+        className="relative"
+        aria-label="Notifications"
+      >
         <Bell className="w-6 h-6 text-slate-800 cursor-pointer hover:text-emerald-700 transition-colors" />
         {hasUnread && (
           <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white" />
@@ -366,10 +383,43 @@ function AdminBell({ announcements, onMarkAllRead, onDismiss, onViewAll, onOpenA
           </div>
 
           <div className="px-3 py-2 space-y-2 max-h-80 overflow-y-auto">
+            {recentCertAlerts.length > 0 && (
+              <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Certificates to verify</p>
+            )}
+            {recentCertAlerts.map((n) => (
+              <div key={n.id} className="relative bg-[#fff8e8] rounded-xl p-3.5">
+                {n.unread && <span className="absolute top-3.5 left-3 w-2 h-2 rounded-full bg-green-500" />}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Review: ${n.message}`}
+                  onClick={() => handleOpenCert(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenCert(n);
+                    }
+                  }}
+                  className="flex items-start gap-3 pl-4 cursor-pointer"
+                >
+                  <span className="w-8 h-8 rounded-lg bg-[#ffecc8] flex items-center justify-center shrink-0">
+                    <ShieldCheck size={16} className="text-[#8c4a00]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-900">{n.title}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 break-words">{n.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{timeAgo(n.at)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {recentCertAlerts.length > 0 && recentAnnouncements.length > 0 && (
+              <p className="px-1 pt-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Announcements</p>
+            )}
             {recentAnnouncements.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-6">
-                No announcements sent yet.
-              </p>
+              recentCertAlerts.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-6">No announcements sent yet.</p>
+              )
             ) : (
               recentAnnouncements.map((a) => (
                 <div
@@ -507,6 +557,11 @@ function ComingSoonPlaceholder({ sectionName }) {
 
 export default function AdminDashboard({ user, onSignOut }) {
   const [activeItem, setActiveItem] = useState("Dashboard");
+  // Set when the admin comes from a certificate alert in the bell: User
+  // Management then opens on the Certificate Verification list. Going there
+  // from the sidebar opens it normally.
+  const [startOnCertificates, setStartOnCertificates] = useState(false);
+  const [certNavKey, setCertNavKey] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -519,6 +574,25 @@ export default function AdminDashboard({ user, onSignOut }) {
   // server. "Unread" means sent after the last time this admin cleared the
   // bell; that moment is remembered in this browser only.
   const [announcements, setAnnouncements] = useState([]);
+
+  // "A farmer sent a certificate to verify" alerts. They are real notifications
+  // saved for this admin; the other kinds are not shown here.
+  const notifications = useNotifications({ limit: 20 });
+  const certAlerts = notifications.items.filter((n) => n.kind === "certificate_submitted");
+  const reloadNotifications = notifications.reload;
+  useEffect(() => {
+    // Check again every minute so a new submission shows up without a reload.
+    const timer = setInterval(() => reloadNotifications(), 60000);
+    return () => clearInterval(timer);
+  }, [reloadNotifications]);
+
+  function handleOpenCertAlert(n) {
+    notifications.markRead(n.id);
+    setStartOnCertificates(true);
+    setCertNavKey((k) => k + 1);
+    setActiveItem("User Management");
+  }
+
   const seenKey = "farmfund_admin_announcements_seen";
 
   const readSeenAt = () => {
@@ -583,6 +657,7 @@ export default function AdminDashboard({ user, onSignOut }) {
   }
 
   function handleMarkAllAnnouncementsRead() {
+    notifications.markAllRead();
     writeSeenAt(Date.now());
     setAnnouncements((prev) => prev.map((a) => ({ ...a, unread: false })));
   }
@@ -687,7 +762,10 @@ export default function AdminDashboard({ user, onSignOut }) {
                     icon={item.icon}
                     label={item.label}
                     active={item.label === activeItem}
-                    onClick={() => setActiveItem(item.label)}
+                    onClick={() => {
+                      setStartOnCertificates(false);
+                      setActiveItem(item.label);
+                    }}
                   />
                 ))}
               </div>
@@ -721,6 +799,9 @@ export default function AdminDashboard({ user, onSignOut }) {
         <div className="absolute top-6 right-8 z-10">
           <AdminBell
             announcements={announcements}
+            certAlerts={certAlerts}
+            onOpenCertAlert={handleOpenCertAlert}
+            onOpened={reloadNotifications}
             onMarkAllRead={handleMarkAllAnnouncementsRead}
             onDismiss={handleDismissAnnouncement}
             onViewAll={() => setActiveItem("Notification Management")}
@@ -751,7 +832,7 @@ export default function AdminDashboard({ user, onSignOut }) {
             onNavigate={setActiveItem}
           />
         ) : activeItem === "User Management" ? (
-          <UserManagement onSignOut={onSignOut} />
+          <UserManagement key={certNavKey} onSignOut={onSignOut} startOnCertificates={startOnCertificates} />
         ) : activeItem === "Farm Management" ? (
           <FarmManagement onSignOut={onSignOut} />
         ) : activeItem === "User Activity" ? (

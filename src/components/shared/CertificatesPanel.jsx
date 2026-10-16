@@ -8,6 +8,9 @@ import {
   bytesText,
   dateOnly,
   dateLocal,
+  typeLabel,
+  moneyText,
+  CREDIT_LIMIT_AMOUNT,
 } from "../../lib/certificates";
 
 const STATUS = {
@@ -19,6 +22,40 @@ const STATUS = {
 export function StatusBadge({ status }) {
   const s = STATUS[status] || STATUS.pending;
   return <span className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${s.className}`}>{s.label}</span>;
+}
+
+// Small label saying what kind of document it is.
+export function TypeChip({ type }) {
+  const barangay = type === "barangay_certificate";
+  return (
+    <span
+      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${
+        barangay ? "bg-[#e8f0e4] text-[#3f6238]" : "bg-gray-100 text-gray-600"
+      }`}
+    >
+      {typeLabel(type)}
+    </span>
+  );
+}
+
+// "Credit limit ₱25,000 · used ₱5,000 · available ₱20,000", or why it is ₱0.
+export function CreditLine({ credit, who = "The farmer" }) {
+  if (!credit) return null;
+  const why = {
+    none: `${who} has not uploaded a Barangay Certificate yet.`,
+    pending: "The Barangay Certificate is waiting to be verified.",
+    rejected: "The Barangay Certificate was rejected.",
+    verified: "",
+  }[credit.barangayStatus];
+  return (
+    <div className="mb-3 rounded-xl border border-[#d6e4cf] bg-[#f4f8f3] px-3 py-2 text-xs text-gray-700" data-testid="credit-line">
+      <p>
+        <span className="font-semibold">Credit limit {moneyText(credit.limit)}</span>
+        {credit.limit > 0 ? ` · used ${moneyText(credit.used)} · available ${moneyText(credit.available)}` : ""}
+      </p>
+      {why && <p className="mt-0.5 text-gray-500">{why} Verifying a Barangay Certificate sets the limit to {moneyText(CREDIT_LIMIT_AMOUNT)}.</p>}
+    </div>
+  );
 }
 
 export function FileIcon({ type }) {
@@ -62,7 +99,7 @@ export function CertificateMeta({ cert }) {
   return <p className="text-xs text-gray-400 mt-0.5 break-words">{bits.join(" · ")}</p>;
 }
 
-function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
+export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState("");
   const rejecting = mode === "rejected";
@@ -99,6 +136,13 @@ function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
         <p className="text-sm text-gray-500 mt-1">
           “{cert.title}”. The farmer will see the result {rejecting ? "and your reason " : ""}on their profile.
         </p>
+        {cert.type === "barangay_certificate" && (
+          <p className="text-xs mt-3 rounded-lg bg-[#f4f8f3] border border-[#d6e4cf] text-[#3f6238] px-3 py-2">
+            {rejecting
+              ? `If this is the farmer's only verified Barangay Certificate, their credit limit goes back to ${moneyText(0)}.`
+              : `Verifying a Barangay Certificate sets the farmer's credit limit to ${moneyText(CREDIT_LIMIT_AMOUNT)}.`}
+          </p>
+        )}
 
         <label htmlFor="cert-note" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mt-5 mb-2">
           {rejecting ? "Reason *" : "Note (optional)"}
@@ -150,6 +194,7 @@ function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
 export default function CertificatesPanel({ farmerId, onSignOut }) {
   const [items, setItems] = useState([]);
   const [canReview, setCanReview] = useState(false);
+  const [credit, setCredit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const latest = useRef(0);
@@ -172,6 +217,7 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
       if (id !== latest.current) return;
       setItems(result.certificates || []);
       setCanReview(Boolean(result.canReview));
+      setCredit(result.credit || null);
     } catch (err) {
       if (id !== latest.current) return;
       if (err && err.status === 401) {
@@ -221,7 +267,10 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
       const result = await reviewCertificate(reviewing.cert.id, reviewing.mode, note);
       const updated = result.certificate;
       setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-      setNotice({ text: reviewing.mode === "verified" ? "Certificate verified." : "Certificate rejected.", tone: "success" });
+      if (result.credit) setCredit(result.credit);
+      const base = reviewing.mode === "verified" ? "Certificate verified." : "Certificate rejected.";
+      const limitNote = updated.type === "barangay_certificate" && result.credit ? ` Credit limit is now ${moneyText(result.credit.limit)}.` : "";
+      setNotice({ text: base + limitNote, tone: "success" });
       setReviewing(null);
     } catch (err) {
       if (err && err.status === 401) {
@@ -239,6 +288,7 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
   return (
     <div className="bg-[#f8f9f8] border border-gray-200 rounded-2xl p-4 mt-4">
       <p className="text-xs font-bold text-gray-800 mb-3">Certificates</p>
+      {!loading && !error && <CreditLine credit={credit} />}
 
       {loading ? (
         <p className="text-xs text-gray-400">Loading certificates…</p>
@@ -265,6 +315,9 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
                   <div className="flex items-start justify-between gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-gray-900 break-words min-w-0">{c.title}</p>
                     <StatusBadge status={c.status} />
+                  </div>
+                  <div className="mt-1">
+                    <TypeChip type={c.type} />
                   </div>
                   <CertificateMeta cert={c} />
                   <ReviewLine cert={c} />

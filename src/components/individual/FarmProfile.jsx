@@ -4,6 +4,10 @@ import { authedRequest } from "../../api";
 import {
   ACCEPT,
   listMine,
+  getCredit,
+  DOC_TYPES,
+  moneyText,
+  CREDIT_LIMIT_AMOUNT,
   uploadCertificate,
   deleteCertificate,
   openCertificate,
@@ -11,7 +15,7 @@ import {
   bytesText,
   messageFrom as certMessageFrom,
 } from "../../lib/certificates";
-import { StatusBadge, FileIcon, ReviewLine, CertificateMeta } from "../shared/CertificatesPanel";
+import { StatusBadge, FileIcon, ReviewLine, CertificateMeta, TypeChip } from "../shared/CertificatesPanel";
 
 const TABS = [
   { key: "personal-info", label: "Personal Info", icon: User },
@@ -656,6 +660,12 @@ function DeleteCertificateModal({ cert, busy, error, onConfirm, onCancel }) {
         <p className="text-sm text-gray-500 mt-1">
           “{cert.title}” will be removed for good. Your cooperative and the FarmFund admin will no longer see it.
         </p>
+        {cert.type === "barangay_certificate" && cert.status === "verified" && (
+          <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            This is a verified Barangay Certificate. If you delete it, your credit limit goes back to ₱0 and you will not be able to
+            request a loan until you upload and verify another one.
+          </p>
+        )}
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         <div className="flex items-center justify-end gap-3 mt-6">
           <button
@@ -678,8 +688,37 @@ function DeleteCertificateModal({ cert, busy, error, onConfirm, onCancel }) {
   );
 }
 
+// Shows the farmer their credit limit and, while it is ₱0, what to do about it.
+function MyCreditCard({ credit }) {
+  if (!credit) return null;
+  const messages = {
+    none: `Upload your Barangay Certificate below to unlock a ${moneyText(CREDIT_LIMIT_AMOUNT)} credit limit.`,
+    pending: "Your Barangay Certificate is waiting for the FarmFund admin to verify it. You can request a loan once it is verified.",
+    rejected: "Your Barangay Certificate was rejected. Read the reason below, then upload a new one.",
+    verified: `Your Barangay Certificate is verified. You can borrow up to ${moneyText(credit.available)} right now.`,
+  };
+  const good = credit.barangayStatus === "verified";
+  return (
+    <div
+      data-testid="my-credit"
+      className={`rounded-2xl border p-6 shadow-sm ${good ? "bg-[#f4f8f3] border-[#d6e4cf]" : "bg-amber-50 border-amber-200"}`}
+    >
+      <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Your credit limit</p>
+      <p className="mt-1 text-3xl font-bold text-gray-900">{moneyText(credit.limit)}</p>
+      {credit.limit > 0 && (
+        <p className="mt-1 text-sm text-gray-600">
+          Used {moneyText(credit.used)} · Available {moneyText(credit.available)}
+        </p>
+      )}
+      <p className={`mt-2 text-sm ${good ? "text-[#3f6238]" : "text-amber-800"}`}>{messages[credit.barangayStatus] || messages.none}</p>
+    </div>
+  );
+}
+
 function CertificatesTab({ showToast }) {
   const [items, setItems] = useState([]);
+  const [credit, setCredit] = useState(null);
+  const [docType, setDocType] = useState("barangay_certificate");
   const [max, setMax] = useState(20);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -710,10 +749,21 @@ function CertificatesTab({ showToast }) {
       const result = await listMine();
       setItems(result.certificates || []);
       if (result.max) setMax(result.max);
+      refreshCredit();
     } catch (err) {
       setLoadError(certMessageFrom(err, "Could not load your certificates."));
     } finally {
       setLoading(false);
+    }
+  }
+
+  // The credit card is extra: if it can't be loaded, the certificates still show.
+  async function refreshCredit() {
+    try {
+      const result = await getCredit();
+      setCredit(result.credit || null);
+    } catch {
+      /* keep what is shown */
     }
   }
 
@@ -725,6 +775,12 @@ function CertificatesTab({ showToast }) {
         if (cancelled) return;
         setItems(result.certificates || []);
         if (result.max) setMax(result.max);
+        try {
+          const c = await getCredit();
+          if (!cancelled) setCredit(c.credit || null);
+        } catch {
+          /* the credit card is extra */
+        }
       } catch (err) {
         if (!cancelled) setLoadError(certMessageFrom(err, "Could not load your certificates."));
       } finally {
@@ -742,8 +798,9 @@ function CertificatesTab({ showToast }) {
     if (uploadingRef.current) return;
     const t = title.trim();
     const i = issuer.trim();
+    const needsTitle = docType === "other";
     const newErrors = {
-      title: !t ? "Enter a title." : t.length < 3 ? "The title must be at least 3 characters." : t.length > 100 ? "The title must be 100 characters or fewer." : /[<>]/.test(t) ? "The title can't contain < or >." : null,
+      title: !needsTitle ? null : !t ? "Enter a title." : t.length < 3 ? "The title must be at least 3 characters." : t.length > 100 ? "The title must be 100 characters or fewer." : /[<>]/.test(t) ? "The title can't contain < or >." : null,
       issuer: i.length > 100 ? "Must be 100 characters or fewer." : /[<>]/.test(i) ? "Can't contain < or >." : null,
       issuedOn: issuedOn && issuedOn > todayText() ? "The date can't be in the future." : null,
       file: fileProblem(file) || null,
@@ -753,7 +810,8 @@ function CertificatesTab({ showToast }) {
     if (Object.values(newErrors).some(Boolean)) return;
 
     const form = new FormData();
-    form.append("title", t);
+    form.append("type", docType);
+    if (needsTitle) form.append("title", t);
     if (i) form.append("issuer", i);
     if (issuedOn) form.append("issuedOn", issuedOn);
     form.append("file", file);
@@ -769,6 +827,7 @@ function CertificatesTab({ showToast }) {
       setFile(null);
       setFileKey((k) => k + 1);
       setErrors({});
+      refreshCredit();
       showToast("Certificate uploaded!");
     } catch (err) {
       setFormError(certMessageFrom(err, "The upload failed. Please try again."));
@@ -803,6 +862,7 @@ function CertificatesTab({ showToast }) {
       await deleteCertificate(deleting.id);
       setItems((prev) => prev.filter((c) => c.id !== deleting.id));
       setDeleting(null);
+      refreshCredit();
       showToast("Certificate deleted.");
     } catch (err) {
       if (err && err.status === 404) {
@@ -819,11 +879,13 @@ function CertificatesTab({ showToast }) {
 
   return (
     <div className="space-y-6">
+      <MyCreditCard credit={credit} />
       <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-        <h3 className="font-bold text-gray-900 mb-1">Upload a Certificate</h3>
+        <h3 className="font-bold text-gray-900 mb-1">Upload a Document</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Add a training certificate, permit or registration. Your cooperative and the FarmFund admin can view it, and the
-          FarmFund admin will verify it. PDF, JPG or PNG, up to 2 MB.
+          To borrow, upload your Barangay Certificate of Agricultural Activity (or Barangay Farmer&apos;s Certificate / Permit /
+          Registration). Once the FarmFund admin verifies it, your credit limit becomes {moneyText(CREDIT_LIMIT_AMOUNT)}. A proof of
+          monthly income is optional. Your cooperative and the admin can view what you upload. PDF, JPG or PNG, up to 2 MB.
         </p>
 
         {full ? (
@@ -834,17 +896,37 @@ function CertificatesTab({ showToast }) {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <TextField
-                  label="Title *"
-                  value={title}
-                  onChange={(v) => {
-                    setTitle(v);
+                <FieldLabel>Document type *</FieldLabel>
+                <select
+                  aria-label="Document type"
+                  value={docType}
+                  onChange={(e) => {
+                    setDocType(e.target.value);
                     setErrors((p) => ({ ...p, title: undefined }));
                   }}
-                  error={errors.title}
-                  placeholder="e.g., Organic Farming Training"
-                />
+                  className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30"
+                >
+                  {DOC_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </div>
+              {docType === "other" && (
+                <div className="sm:col-span-2">
+                  <TextField
+                    label="Title *"
+                    value={title}
+                    onChange={(v) => {
+                      setTitle(v);
+                      setErrors((p) => ({ ...p, title: undefined }));
+                    }}
+                    error={errors.title}
+                    placeholder="e.g., Organic Farming Training"
+                  />
+                </div>
+              )}
               <TextField
                 label="Issued by (optional)"
                 value={issuer}
@@ -894,7 +976,7 @@ function CertificatesTab({ showToast }) {
                 disabled={uploading}
                 className="px-6 py-2.5 rounded-xl bg-[#4f7331] text-white text-sm font-semibold hover:bg-[#3f6238] transition-colors disabled:opacity-60"
               >
-                {uploading ? "Uploading…" : "Upload Certificate"}
+                {uploading ? "Uploading…" : "Upload Document"}
               </button>
             </div>
           </>
@@ -932,6 +1014,9 @@ function CertificatesTab({ showToast }) {
                     <div className="flex items-start justify-between gap-2 flex-wrap">
                       <p className="text-sm font-semibold text-gray-900 break-words min-w-0">{c.title}</p>
                       <StatusBadge status={c.status} />
+                    </div>
+                    <div className="mt-1">
+                      <TypeChip type={c.type} />
                     </div>
                     <CertificateMeta cert={c} />
                     <ReviewLine cert={c} />

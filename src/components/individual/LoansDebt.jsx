@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Clock, CheckCircle2, XCircle, AlertTriangle, Info, Plus, Wallet, X, Paperclip, Eye } from "lucide-react";
 import { authedRequest } from "../../api";
 import { sanitizeAmount, displayAmount, todayLocalISO, loanRef, METHOD_LABEL } from "../../lib/repaymentData";
-import { ACCEPT, MAX_FILE_BYTES, fileProblem, bytesText, messageFrom, dateLocal } from "../../lib/certificates";
+import { ACCEPT, MAX_FILE_BYTES, fileProblem, bytesText, messageFrom, dateLocal, getCredit, CREDIT_LIMIT_AMOUNT } from "../../lib/certificates";
 import {
   PROOF_METHODS,
   PROOF_METHOD_LABEL,
@@ -248,16 +248,49 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
 const selectClass =
   "bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30";
 
+// Why the farmer can or cannot request a loan right now.
+function CreditBanner({ credit }) {
+  if (!credit) return null;
+  if (credit.limit <= 0) {
+    const text = {
+      none: `Your credit limit is ${peso(0)}. Upload your Barangay Certificate in your farm profile (Certificates tab). Once the FarmFund admin verifies it, your limit becomes ${peso(CREDIT_LIMIT_AMOUNT)} and you can request a loan.`,
+      pending: `Your credit limit is ${peso(0)} for now. Your Barangay Certificate is waiting for the FarmFund admin to verify it. You can request a loan once it is verified.`,
+      rejected: `Your credit limit is ${peso(0)}. Your Barangay Certificate was rejected. Upload a new one in your farm profile (Certificates tab).`,
+    }[credit.barangayStatus];
+    return (
+      <div role="status" data-testid="credit-banner" className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+        {text}
+      </div>
+    );
+  }
+  const pct = Math.min(100, Math.round((credit.used / credit.limit) * 100));
+  return (
+    <div data-testid="credit-banner" className="mt-4 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-900">Credit limit {peso(credit.limit)}</p>
+        <p className="text-sm text-gray-600">
+          Used {peso(credit.used)} · <span className="font-semibold text-[#3f6238]">Available {peso(credit.available)}</span>
+        </p>
+      </div>
+      <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
+        <div className="h-full bg-[#4f7331]" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 // Requests a real loan from a real, active cooperative — status is always
 // decided by the backend (forced to "pending" there regardless of anything
 // sent here), so there's nothing to pick for that on this form.
-function NewLoanModal({ cooperatives, onSave, onCancel }) {
+function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
   const [cooperative, setCooperative] = useState(cooperatives[0]?._id || "");
   const [principalAmount, setPrincipalAmount] = useState("");
   const [interestRatePercent, setInterestRatePercent] = useState("");
   const [termMonths, setTermMonths] = useState("12");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const cap = credit ? Math.min(credit.available, 500000) : 500000;
+  const overLimit = Number(principalAmount) > cap;
 
   async function handleSave() {
     const principal = parseFloat(principalAmount);
@@ -270,6 +303,14 @@ function NewLoanModal({ cooperatives, onSave, onCancel }) {
     }
     if (!principal || principal <= 0 || principal > 500000) {
       setError("Enter a principal amount between ₱1 and ₱500,000.");
+      return;
+    }
+    if (credit && principal > credit.available) {
+      setError(
+        credit.available > 0
+          ? `That is more than your available credit. You can borrow up to ${peso(credit.available)}.`
+          : "You have no available credit right now."
+      );
       return;
     }
     if (rate === undefined || isNaN(rate) || rate < 0 || rate > 100) {
@@ -339,18 +380,16 @@ function NewLoanModal({ cooperatives, onSave, onCancel }) {
                 setPrincipalAmount(digitsOnly);
               }}
               placeholder="50,000"
-              className={`${selectClass} pl-8 ${
-                Number(principalAmount) > 500000 ? "ring-2 ring-red-400 border-red-300" : ""
-              }`}
+              className={`${selectClass} pl-8 ${overLimit ? "ring-2 ring-red-400 border-red-300" : ""}`}
             />
           </div>
           <p
             className={`mt-1 text-[11px] ${
-              Number(principalAmount) > 500000 ? "text-red-500 font-semibold" : "text-gray-400"
+              overLimit ? "text-red-500 font-semibold" : "text-gray-400"
             }`}
           >
-            {principalAmount ? peso(Number(principalAmount)) : "₱0.00"} / ₱500,000.00 max
-            {Number(principalAmount) > 500000 && " — over the limit"}
+            {principalAmount ? peso(Number(principalAmount)) : "₱0.00"} / {peso(credit ? credit.available : 500000)} {credit ? "available" : "max"}
+            {overLimit && " — over the limit"}
           </p>
         </div>
 
@@ -680,6 +719,16 @@ export default function LoansDebt() {
   const [actionError, setActionError] = useState("");
   const [withdrawingId, setWithdrawingId] = useState(null);
   const [paymentsRefresh, setPaymentsRefresh] = useState(0);
+  const [credit, setCredit] = useState(null);
+
+  async function refreshCredit() {
+    try {
+      const result = await getCredit();
+      setCredit(result.credit || null);
+    } catch {
+      /* the credit limit is extra: the server still checks every request */
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -695,6 +744,12 @@ export default function LoansDebt() {
         if (cancelled) return;
         setLoans(loansData);
         setCooperatives(coopsData);
+        try {
+          const c = await getCredit();
+          if (!cancelled) setCredit(c.credit || null);
+        } catch {
+          if (!cancelled) setCredit(null);
+        }
         // The proofs are extra: if they can't be loaded the loans still show.
         try {
           const mine = await listMyProofs();
@@ -762,6 +817,7 @@ export default function LoansDebt() {
     setLoans((prev) => [newLoan, ...prev]);
     setSelectedId(newLoan._id);
     setIsNewLoanOpen(false);
+    refreshCredit();
   }
 
   if (loading) {
@@ -791,6 +847,8 @@ export default function LoansDebt() {
   const totalOutstanding = owing.reduce((sum, l) => sum + (typeof l.remainingBalance === "number" ? l.remainingBalance : l.principalAmount), 0);
   const pendingCount = loans.filter((l) => l.status === "pending").length;
   const canPay = loans.some(isPayable);
+  // Only block the button when we know the limit; if it could not be loaded the server still decides.
+  const cannotRequest = Boolean(credit) && credit.available <= 0;
   const waitingByLoan = proofs.reduce((acc, p) => (p.status === "pending" ? { ...acc, [p.loanId]: (acc[p.loanId] || 0) + 1 } : acc), {});
   const selectedProofs = proofs.filter((p) => p.loanId === selectedId);
 
@@ -812,12 +870,16 @@ export default function LoansDebt() {
           )}
           <button
             onClick={() => setIsNewLoanOpen(true)}
-            className="bg-[#3f6238] hover:bg-[#34512e] text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm transition-colors"
+            disabled={cannotRequest}
+            title={cannotRequest ? (credit.limit <= 0 ? "Your credit limit is ₱0 until your Barangay Certificate is verified" : "You have no available credit") : undefined}
+            className="bg-[#3f6238] hover:bg-[#34512e] text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus size={16} /> Request a Loan
           </button>
         </div>
       </div>
+
+      <CreditBanner credit={credit} />
 
       {actionError && (
         <div role="alert" className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-600">
@@ -869,7 +931,7 @@ export default function LoansDebt() {
       </div>
 
       {isNewLoanOpen && (
-        <NewLoanModal cooperatives={cooperatives} onSave={handleNewLoan} onCancel={() => setIsNewLoanOpen(false)} />
+        <NewLoanModal cooperatives={cooperatives} credit={credit} onSave={handleNewLoan} onCancel={() => setIsNewLoanOpen(false)} />
       )}
       {isPaymentOpen && (
         <LoanPaymentModal loans={loans} initialLoanId={selectedId} onSent={handleProofSent} onCancel={() => setIsPaymentOpen(false)} />

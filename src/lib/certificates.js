@@ -4,12 +4,40 @@ export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
 export const listMine = () => authedRequest("/api/certificates");
+export const getCredit = () => authedRequest("/api/certificates/credit");
+// The admin's review queue: every farmer's certificates in one list.
+export function listCertificateQueue({ status = "pending", type = "all", search = "", page = 1, limit = 20 } = {}) {
+  const q = new URLSearchParams();
+  q.set("status", status);
+  if (type && type !== "all") q.set("type", type);
+  if (search) q.set("search", search);
+  q.set("page", String(page));
+  q.set("limit", String(limit));
+  return authedRequest(`/api/certificates/queue?${q.toString()}`);
+}
 export const listForFarmer = (farmerId) => authedRequest(`/api/certificates/farmer/${farmerId}`);
 export const uploadCertificate = (formData) => authedRequest("/api/certificates", { method: "POST", body: formData });
 export const deleteCertificate = (id) => authedRequest(`/api/certificates/${id}`, { method: "DELETE" });
 export const reviewCertificate = (id, status, note) =>
   authedRequest(`/api/certificates/${id}/review`, { method: "PATCH", body: { status, note } });
 const getLink = (id) => authedRequest(`/api/certificates/${id}/link`);
+
+// The kinds of document a farmer can upload. Only a verified Barangay
+// Certificate raises the credit limit (to ₱25,000); the others are extra.
+export const CREDIT_LIMIT_AMOUNT = 25000;
+export const DOC_TYPES = [
+  { value: "barangay_certificate", label: "Barangay Certificate of Agricultural Activity (required for verification)" },
+  { value: "income_certificate", label: "Proof of Monthly Income / Income Certificate (optional)" },
+  { value: "other", label: "Other document" },
+];
+export const TYPE_LABEL = {
+  barangay_certificate: "Barangay Certificate",
+  income_certificate: "Income Certificate",
+  other: "Other document",
+};
+export const typeLabel = (type) => TYPE_LABEL[type] || TYPE_LABEL.other;
+
+export const moneyText = (n) => `₱${Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
 // The server explains what was wrong (e.g. "That file is larger than 2 MB.").
 export const messageFrom = (err, fallback) =>

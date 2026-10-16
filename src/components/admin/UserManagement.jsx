@@ -25,6 +25,8 @@ import {
 } from "../../lib/adminUsers";
 import { getCooperativeImpact, deleteCooperative, countRows } from "../../lib/adminArchive";
 import CertificatesPanel from "../shared/CertificatesPanel";
+import CertificateReviewQueue from "./CertificateReviewQueue";
+import { listCertificateQueue } from "../../lib/certificates";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -574,9 +576,13 @@ function PasswordResetModal({ user, busy, error, onConfirm, onCancel }) {
   );
 }
 
-export default function UserManagement({ onSignOut }) {
-  const [typeFilter, setTypeFilter] = useState("all");
-  const list = useAdminUserList({ type: typeFilter, onUnauthorized: onSignOut });
+export default function UserManagement({ onSignOut, startOnCertificates = false }) {
+  const [typeFilter, setTypeFilter] = useState(startOnCertificates ? "certificates" : "all");
+  // "certificates" is not an account type: it swaps the account table for the
+  // list of submitted certificates, so the accounts are not loaded meanwhile.
+  const queueMode = typeFilter === "certificates";
+  const list = useAdminUserList({ type: queueMode ? "all" : typeFilter, enabled: !queueMode, onUnauthorized: onSignOut });
+  const [pendingCerts, setPendingCerts] = useState(0);
   const { users, total, page, pages, limit, loading, error, search, setSearch, setPage, reload } = list;
 
   const [viewingUser, setViewingUser] = useState(null);
@@ -589,6 +595,21 @@ export default function UserManagement({ onSignOut }) {
   const [busy, setBusy] = useState(false);
   const [modalError, setModalError] = useState("");
   const actingRef = useRef(false); // stops a double-click from sending twice
+
+  // How many certificates are waiting, for the badge on the filter button.
+  useEffect(() => {
+    let cancelled = false;
+    listCertificateQueue({ status: "pending", limit: 1 })
+      .then((r) => {
+        if (!cancelled) setPendingCerts(r.pendingCount || 0);
+      })
+      .catch(() => {
+        /* the badge is extra */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function closeModals() {
     setUpdatingUser(null);
@@ -688,20 +709,20 @@ export default function UserManagement({ onSignOut }) {
         <p className="mt-1 text-gray-500">View, update, suspend, and delete accounts across the platform</p>
       </div>
 
-      <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="relative w-full min-w-0 sm:flex-1">
+      <div className="mt-6 flex flex-col 2xl:flex-row 2xl:items-center gap-3">
+        <div className="relative w-full min-w-0 2xl:flex-1">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search users by name or email..."
+            placeholder={queueMode ? "Search farmers by name or email..." : "Search users by name or email..."}
             aria-label="Search users"
             className="bg-[#f4f4f4] border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30"
           />
         </div>
 
-        <div className="flex flex-wrap gap-2 sm:shrink-0">
+        <div className="flex flex-wrap gap-2 2xl:shrink-0">
           {TYPE_FILTERS.map((filter) => (
             <button
               key={filter.value}
@@ -715,9 +736,33 @@ export default function UserManagement({ onSignOut }) {
               {filter.label}
             </button>
           ))}
+          <button
+            onClick={() => setTypeFilter("certificates")}
+            className={`flex items-center gap-2 font-medium px-4 py-2 rounded-xl text-sm transition-colors ${
+              queueMode ? "bg-[#38512f] text-white" : "bg-[#f0f0f0] text-gray-700 hover:bg-gray-200"
+            }`}
+          >
+            Certificate Verification
+            {pendingCerts > 0 && (
+              <span
+                aria-label={`${pendingCerts} waiting`}
+                className={`text-xs font-bold px-2 py-0.5 rounded-full ${queueMode ? "bg-white text-[#38512f]" : "bg-[#ffecc8] text-[#8c4a00]"}`}
+              >
+                {pendingCerts}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
+      {queueMode ? (
+        <CertificateReviewQueue
+          search={search}
+          onSignOut={onSignOut}
+          onPendingCount={setPendingCerts}
+          onToast={(message, tone) => setToast({ message, tone })}
+        />
+      ) : (
       <div className="mt-6 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm overflow-x-auto">
         {error ? (
           <div className="py-8 text-center">
@@ -813,6 +858,7 @@ export default function UserManagement({ onSignOut }) {
           </div>
         )}
       </div>
+      )}
 
       {viewingUser && <ViewAccountModal user={viewingUser} onClose={() => setViewingUser(null)} onSignOut={onSignOut} />}
 
