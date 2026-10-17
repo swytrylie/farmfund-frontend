@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Clock, CheckCircle2, XCircle, AlertTriangle, Info, Plus, Wallet, X, Paperclip, Eye } from "lucide-react";
+import { Clock, CheckCircle2, XCircle, AlertTriangle, Info, Plus, Wallet, X, Paperclip, Eye, Hourglass, LifeBuoy, Snowflake } from "lucide-react";
 import { authedRequest } from "../../api";
 import LoanBasis from "../shared/LoanBasis";
 import { sanitizeAmount, displayAmount, todayLocalISO, loanRef, METHOD_LABEL } from "../../lib/repaymentData";
@@ -20,6 +20,7 @@ import {
   isAwaitingAdmin,
   wasNotVerified,
 } from "../../lib/loans";
+import { createReliefClaim, openClaimProof, isRunning, isGracePeriod, claimSummary } from "../../lib/calamity";
 import {
   PROOF_METHODS,
   PROOF_METHOD_LABEL,
@@ -35,8 +36,8 @@ import {
 } from "../../lib/paymentProofs";
 
 const MAX_PAYMENT = 500000;
-// A loan can be paid while it is running (or late), and only while something is still owed.
-const isPayable = (loan) => (loan.status === "active" || loan.status === "defaulted") && loan.remainingBalance > 0;
+// A loan can be paid while it is running (in its grace period too) or late, and only while something is still owed.
+const isPayable = (loan) => (isRunning(loan) || loan.status === "defaulted") && loan.remainingBalance > 0;
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
@@ -46,6 +47,7 @@ const STATUS_CONFIG = {
   pending: { label: "Pending review", Icon: Clock, iconColor: "text-amber-500", card: "bg-white border-gray-100" },
   approved: { label: "Approved", Icon: CheckCircle2, iconColor: "text-blue-500", card: "bg-white border-gray-100" },
   active: { label: "Active", Icon: Clock, iconColor: "text-amber-500", card: "border-2 border-[#4f7331] bg-white" },
+  grace_period: { label: "Grace period", Icon: Hourglass, iconColor: "text-teal-600", card: "border-2 border-teal-500 bg-white" },
   paid_off: { label: "Fully repaid", Icon: CheckCircle2, iconColor: "text-emerald-600", card: "bg-[#f0fdf4] border-emerald-300" },
   defaulted: { label: "Defaulted", Icon: AlertTriangle, iconColor: "text-red-500", card: "bg-red-50 border-red-200" },
   rejected: { label: "Rejected", Icon: XCircle, iconColor: "text-gray-400", card: "bg-gray-50 border-gray-200" },
@@ -83,7 +85,7 @@ function LoanSelectorCard({ loan, isSelected, onSelect, waitingProofs = 0 }) {
       <div className="mt-2 flex items-center justify-between text-xs">
         <span className="text-gray-500">{config.label}</span>
         <span className="text-gray-700 font-medium">
-          {loan.status === "active" || loan.status === "defaulted"
+          {isRunning(loan) || loan.status === "defaulted"
             ? `${peso(loan.remainingBalance ?? loan.principalAmount)} left`
             : peso(loan.principalAmount)}
         </span>
@@ -173,9 +175,59 @@ function RecordedPayments({ loanId, refreshKey }) {
   );
 }
 
-function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawingId, paymentsRefresh }) {
+// Disaster relief on a running crop loan: the button to ask, and where the
+// latest claim stands.
+const TONE = {
+  wait: "bg-amber-50 border-amber-200 text-amber-900",
+  bad: "bg-red-50 border-red-200 text-red-800",
+  good: "bg-sky-50 border-sky-200 text-sky-900",
+  done: "bg-gray-50 border-gray-200 text-gray-700",
+};
+function ReliefSection({ loan, onRequest, onViewProof }) {
+  const relief = loan.relief;
+  if (!relief || (!relief.claim && !relief.canRequest)) return null;
+  const claim = relief.claim;
+  const summary = claimSummary(claim);
+  return (
+    <div className="mt-4 border border-gray-100 rounded-xl p-3" data-testid="relief-section">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+          <LifeBuoy size={15} className="text-[#4f7331]" /> Disaster relief
+        </p>
+        {relief.canRequest && (
+          <button
+            type="button"
+            onClick={() => onRequest(loan)}
+            className="px-3 py-1.5 rounded-lg border border-[#3f6238] text-[#3f6238] text-xs font-semibold hover:bg-[#f4f8f3] transition-colors"
+          >
+            Request disaster relief
+          </button>
+        )}
+      </div>
+      {!claim && (
+        <p className="mt-1 text-xs text-gray-500">
+          Did a flood, typhoon or other calamity hit your farm? Send a proof. If it is verified, your cooperative can freeze this loan: you owe no new interest for 90 days and the due date moves later.
+        </p>
+      )}
+      {summary && (
+        <div className={`mt-2 rounded-lg border p-2.5 text-xs ${TONE[summary.tone]}`} data-testid="claim-status" data-tone={summary.tone}>
+          <p className="font-semibold flex items-center gap-1.5">
+            {summary.tone === "good" && <Snowflake size={13} />}
+            {summary.title} <span className="font-normal opacity-80">· {claim.calamityLabel}</span>
+          </p>
+          <p className="mt-0.5">{summary.text}</p>
+          <button type="button" onClick={() => onViewProof(claim)} className="mt-1.5 inline-flex items-center gap-1 font-medium underline">
+            <Eye size={12} /> View proof
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawingId, paymentsRefresh, onRequestRelief, onViewClaimProof }) {
   const config = STATUS_CONFIG[loan.status] || STATUS_CONFIG.pending;
-  const hasBalance = typeof loan.totalPayable === "number" && ["active", "defaulted", "paid_off"].includes(loan.status);
+  const hasBalance = typeof loan.totalPayable === "number" && ["active", "grace_period", "defaulted", "paid_off"].includes(loan.status);
   const stats = [
     { label: "Principal", value: peso(loan.principalAmount), color: "text-gray-900" },
     { label: "Interest Rate", value: rateText(loan), color: "text-gray-900" },
@@ -245,7 +297,18 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
           Approved. You can start paying once {loan.cooperative?.name || "the cooperative"} releases the loan.
         </div>
       )}
-      {(loan.status === "active" || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
+      {isGracePeriod(loan) && (
+        <div className="mt-4 bg-teal-50 border border-teal-200 rounded-xl p-3 text-xs text-teal-900" data-testid="grace-banner">
+          <p className="flex items-center gap-2 font-semibold">
+            <Hourglass size={14} className="shrink-0" />
+            Grace period: your {loan.cropLabel ? loan.cropLabel.toLowerCase() : "crop"} is ready to harvest.
+          </p>
+          <p className="mt-1 pl-6">
+            You have until {dateLocal(loan.graceEndsAt || loan.dueDate)} to dry, mill and sell it and pay this loan. No extra interest is added, and you can pay any time.
+          </p>
+        </div>
+      )}
+      {(isRunning(loan) || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
         <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900" data-testid="due-banner">
           <Info size={14} className="shrink-0" />
           <span>
@@ -260,6 +323,8 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
           This request was not approved.
         </div>
       )}
+
+      <ReliefSection loan={loan} onRequest={onRequestRelief} onViewProof={onViewClaimProof} />
 
       {hasBalance && (
         <div className="mt-5">
@@ -663,6 +728,197 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
   );
 }
 
+// "A calamity hit my farm." Sends what happened and a proof to a FarmFund
+// admin. Nothing about the loan changes until the admin verifies it and the
+// cooperative's owner activates the freeze.
+function ReliefModal({ loan, onSent, onCancel }) {
+  const [options, setOptions] = useState(null);
+  const [optionsError, setOptionsError] = useState("");
+  const [calamity, setCalamity] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState(null);
+  const [fileMsg, setFileMsg] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const fileInput = useRef(null);
+  const pickTurn = useRef(0);
+
+  function loadOptions() {
+    setOptionsError("");
+    getLoanOptions()
+      .then(setOptions)
+      .catch((err) => setOptionsError(messageFrom(err, "Could not load the list of calamities.")));
+  }
+  useEffect(() => {
+    loadOptions();
+  }, []);
+
+  useEffect(() => {
+    if (!file || !/^image\//.test(file.type) || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const descriptionLength = description.trim().length;
+  const descriptionOk = descriptionLength >= DESCRIPTION_MIN;
+  const canSubmit = !saving && !preparing && !!options && !!calamity && descriptionOk && !!file && !fileMsg;
+
+  async function handlePick(e) {
+    const picked = e.target.files && e.target.files[0];
+    if (!picked) return;
+    setError("");
+    setPreparing(true);
+    const turn = ++pickTurn.current;
+    const ready = await prepareReceipt(picked);
+    if (turn !== pickTurn.current) return; // a newer file was chosen meanwhile: only that one counts
+    setPreparing(false);
+    const problem = fileProblem(ready);
+    setFileMsg(problem);
+    setFile(problem ? null : ready);
+  }
+
+  async function handleSend() {
+    if (!calamity) return setError("Choose what happened to your farm.");
+    if (!descriptionOk) return setError(`Describe what happened (at least ${DESCRIPTION_MIN} characters).`);
+    if (!file) return setError("Upload a photo or PDF as proof that your farm was affected.");
+    setSaving(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("loan", loan._id);
+      body.append("calamity", calamity);
+      body.append("description", description.trim());
+      body.append("file", file);
+      const result = await createReliefClaim(body);
+      onSent(result.claim);
+    } catch (err) {
+      setError(messageFrom(err, "Something went wrong. Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={saving ? undefined : onCancel}>
+      <div
+        role="dialog"
+        aria-label="Request disaster relief"
+        className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-xl space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div>
+          <h3 className="text-xl font-bold text-gray-900">Request disaster relief</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            For your {loan.cropLabel ? `${loan.cropLabel.toLowerCase()} ` : ""}loan with {loan.cooperative?.name || "your cooperative"}. A FarmFund admin checks your proof first. If it is verified, your cooperative's owner can activate a calamity freeze: you owe no new interest for {options ? options.freezeDays : 90} days and your due date moves later.
+          </p>
+        </div>
+
+        {optionsError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-600 flex items-center justify-between gap-3">
+            <span>{optionsError}</span>
+            <button type="button" onClick={loadOptions} className="font-semibold underline shrink-0">
+              Try again
+            </button>
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="rd-calamity" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">What happened *</label>
+          <select id="rd-calamity" value={calamity} onChange={(e) => setCalamity(e.target.value)} disabled={!options} className={selectClass}>
+            <option value="">{options ? "Select the calamity" : "Loading…"}</option>
+            {options && options.calamities.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="rd-desc" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Describe the damage *</label>
+          <textarea
+            id="rd-desc"
+            rows={3}
+            value={description}
+            maxLength={DESCRIPTION_MAX}
+            onChange={(e) => setDescription(cleanDescription(e.target.value))}
+            placeholder="e.g. The river flooded my rice field on Oct 3. About 2 hectares were under water for four days."
+            className={`${selectClass} resize-none`}
+          />
+          <p className={`mt-1 text-[11px] ${description && !descriptionOk ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+            {description && !descriptionOk ? `Write at least ${DESCRIPTION_MIN} characters` : `When it happened and how much was lost. ${descriptionLength}/${DESCRIPTION_MAX}`}
+          </p>
+        </div>
+
+        <div>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Proof *</span>
+          <input
+            ref={fileInput}
+            type="file"
+            accept={ACCEPT}
+            onChange={handlePick}
+            onClick={(e) => {
+              e.currentTarget.value = ""; // so choosing the same file again still counts as a change
+            }}
+            className="hidden"
+            aria-label="Disaster proof file"
+            data-testid="relief-input"
+          />
+          {file ? (
+            <div className="flex items-center gap-3 border border-gray-200 rounded-xl p-2.5">
+              {previewUrl ? (
+                <img src={previewUrl} alt="Proof preview" className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+              ) : (
+                <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">PDF</span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                <p className="text-xs text-gray-400">{bytesText(file.size)}</p>
+              </div>
+              <button type="button" onClick={() => fileInput.current?.click()} className="text-xs text-[#4f7331] font-medium hover:underline">
+                Change
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={preparing}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-xl py-4 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Paperclip size={16} /> {preparing ? "Getting your photo ready…" : "Choose a photo or PDF as proof"}
+            </button>
+          )}
+          <p className={`mt-1 text-[11px] ${fileMsg ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+            {fileMsg || `A photo of the damaged field, a barangay or weather report. JPG, PNG or PDF, up to ${bytesText(MAX_FILE_BYTES)}.`}
+          </p>
+        </div>
+
+        {error && (
+          <p role="alert" className="text-xs text-red-500">
+            {error}
+          </p>
+        )}
+
+        <div className="flex items-center justify-end gap-3">
+          <button onClick={onCancel} disabled={saving} className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={!canSubmit}
+            className="px-6 py-2 rounded-xl bg-[#4f7331] text-white hover:bg-[#3f6238] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saving ? "Sending…" : "Send claim"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const labelClass = "text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5";
 
 // "I paid — here is my receipt." Sends the receipt to the cooperative that
@@ -941,6 +1197,7 @@ export default function LoansDebt() {
   const [selectedId, setSelectedId] = useState(null);
   const [isNewLoanOpen, setIsNewLoanOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [reliefLoan, setReliefLoan] = useState(null);
   const [proofs, setProofs] = useState([]);
   const [toast, setToast] = useState("");
   const [actionError, setActionError] = useState("");
@@ -1040,6 +1297,28 @@ export default function LoansDebt() {
     }
   }
 
+  // A claim was sent: show the loan as it is now (the claim is on it).
+  async function handleReliefSent() {
+    setReliefLoan(null);
+    setActionError("");
+    setToast("Claim sent. A FarmFund admin will check your proof first.");
+    try {
+      setLoans(await authedRequest("/api/loans?limit=100"));
+    } catch {
+      /* the claim is saved; the list refreshes next time */
+    }
+  }
+
+  async function handleViewClaimProof(claim) {
+    setActionError("");
+    try {
+      const opened = await openClaimProof(claim.id);
+      if (!opened) setActionError("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+    } catch (err) {
+      setActionError(messageFrom(err, "The proof could not be opened."));
+    }
+  }
+
   function handleNewLoan(newLoan) {
     setLoans((prev) => [newLoan, ...prev]);
     setSelectedId(newLoan._id);
@@ -1070,7 +1349,7 @@ export default function LoansDebt() {
   const selectedLoan = loans.find((l) => l._id === selectedId) || null;
   // What is still owed, counting interest and subtracting what was paid.
   // (An approved loan has not paid anything yet, so it owes its full amount.)
-  const owing = loans.filter((l) => ["active", "approved", "defaulted"].includes(l.status));
+  const owing = loans.filter((l) => ["active", "grace_period", "approved", "defaulted"].includes(l.status));
   const totalOutstanding = owing.reduce((sum, l) => sum + (typeof l.remainingBalance === "number" ? l.remainingBalance : l.principalAmount), 0);
   const pendingCount = loans.filter((l) => l.status === "pending" || l.status === "pending_admin").length;
   const canPay = loans.some(isPayable);
@@ -1148,6 +1427,8 @@ export default function LoansDebt() {
               onWithdrawProof={handleWithdrawProof}
               withdrawingId={withdrawingId}
               paymentsRefresh={paymentsRefresh}
+              onRequestRelief={setReliefLoan}
+              onViewClaimProof={handleViewClaimProof}
             />
           ) : (
             <div className="bg-white border border-gray-200 rounded-2xl p-12 flex items-center justify-center min-h-[200px] shadow-sm">
@@ -1163,6 +1444,7 @@ export default function LoansDebt() {
       {isPaymentOpen && (
         <LoanPaymentModal loans={loans} initialLoanId={selectedId} onSent={handleProofSent} onCancel={() => setIsPaymentOpen(false)} />
       )}
+      {reliefLoan && <ReliefModal loan={reliefLoan} onSent={handleReliefSent} onCancel={() => setReliefLoan(null)} />}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
     </div>
   );

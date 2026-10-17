@@ -4,7 +4,7 @@ import { authedRequest } from "../../api";
 import { peso, round2, fetchAllPages } from "../../lib/repaymentData";
 import { daysOverdue } from "../../lib/reminderData";
 
-const DISBURSED = ["active", "paid_off", "defaulted"];
+const DISBURSED = ["active", "grace_period", "paid_off", "defaulted"];
 const sum = (items, pick) => round2(items.reduce((s, x) => s + pick(x), 0));
 
 // The six calendar months ending with the current one, oldest first.
@@ -32,7 +32,7 @@ const bucketFor = (months, date) => {
 // Everything here is worked out from the cooperative's real loans and
 // payments (the server attaches each loan's amount paid and remaining
 // balance).
-//   "Lent"       = money actually disbursed: active, paid_off, or defaulted.
+//   "Lent"       = money actually disbursed: active, grace_period, paid_off, or defaulted.
 //   "Outstanding" = what active and defaulted loans still owe, interest included.
 //   "Repayment rate" = money collected ÷ money that has come due. A loan
 //                  counts as "come due" once its due date has passed, or once
@@ -46,7 +46,7 @@ export function computeAnalytics(loans, payments, now = new Date()) {
   const totalLent = sum(disbursed, (l) => l.principalAmount);
   const totalCollected = sum(disbursed, (l) => l.amountPaid);
   const outstanding = sum(
-    loans.filter((l) => l.status === "active" || l.status === "defaulted"),
+    loans.filter((l) => l.status === "active" || l.status === "grace_period" || l.status === "defaulted"),
     (l) => l.remainingBalance
   );
 

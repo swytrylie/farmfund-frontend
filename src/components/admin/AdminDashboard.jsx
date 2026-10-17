@@ -10,6 +10,7 @@ import {
   Megaphone,
   ShieldCheck,
   Landmark,
+  LifeBuoy,
   FileClock,
   DatabaseBackup,
   Archive,
@@ -43,6 +44,7 @@ import BackupRecovery from "./BackupRecovery";
 import ArchiveManagement from "./ArchiveManagement";
 import SystemMonitoring from "./SystemMonitoring";
 import LoanCollateralReview from "./LoanCollateralReview";
+import CalamityClaims from "./CalamityClaims";
 import { formatDate } from "../../lib/adminUsers";
 
 const NAV_GROUPS = [
@@ -61,7 +63,10 @@ const NAV_GROUPS = [
   },
   {
     label: "Lending",
-    items: [{ icon: Landmark, label: "Loan Collateral" }],
+    items: [
+      { icon: Landmark, label: "Loan Collateral" },
+      { icon: LifeBuoy, label: "Calamity Claims" },
+    ],
   },
   {
     label: "Monitoring",
@@ -321,7 +326,7 @@ function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
   );
 }
 
-function AdminBell({ announcements, certAlerts = [], loanAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpenLoanAlert, onOpened }) {
+function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpenLoanAlert, onOpenClaimAlert, onOpened }) {
   const [isOpen, setIsOpen] = useState(false);
   // Tracked separately from the real announcements data — dismissing a
   // card here only hides it from THIS popup. The actual sent-announcement
@@ -332,10 +337,11 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], onMarkAllR
 
   const visibleAnnouncements = announcements.filter((a) => !dismissedIds.has(a.id));
   const recentAnnouncements = visibleAnnouncements.slice(0, 5);
-  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread) || loanAlerts.some((n) => n.unread);
+  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread) || loanAlerts.some((n) => n.unread) || claimAlerts.some((n) => n.unread);
   const recentCertAlerts = certAlerts.slice(0, 5);
   const recentLoanAlerts = loanAlerts.slice(0, 5);
-  const noAlerts = recentCertAlerts.length === 0 && recentLoanAlerts.length === 0;
+  const recentClaimAlerts = claimAlerts.slice(0, 5);
+  const noAlerts = recentCertAlerts.length === 0 && recentLoanAlerts.length === 0 && recentClaimAlerts.length === 0;
 
   function handleDismiss(id) {
     setDismissedIds((prev) => new Set(prev).add(id));
@@ -355,6 +361,11 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], onMarkAllR
   function handleOpenCert(n) {
     setIsOpen(false);
     onOpenCertAlert(n);
+  }
+
+  function handleOpenClaim(n) {
+    setIsOpen(false);
+    onOpenClaimAlert?.(n);
   }
 
   function handleOpenLoan(n) {
@@ -417,6 +428,36 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], onMarkAllR
                 >
                   <span className="w-8 h-8 rounded-lg bg-[#dbeafe] flex items-center justify-center shrink-0">
                     <Landmark size={16} className="text-[#1d4ed8]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-900">{n.title}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 break-words">{n.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{timeAgo(n.at)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {recentClaimAlerts.length > 0 && (
+              <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Calamity claims to verify</p>
+            )}
+            {recentClaimAlerts.map((n) => (
+              <div key={n.id} className="relative bg-[#f0f9ff] rounded-xl p-3.5">
+                {n.unread && <span className="absolute top-3.5 left-3 w-2 h-2 rounded-full bg-green-500" />}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Review claim: ${n.message}`}
+                  onClick={() => handleOpenClaim(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenClaim(n);
+                    }
+                  }}
+                  className="flex items-start gap-3 pl-4 cursor-pointer"
+                >
+                  <span className="w-8 h-8 rounded-lg bg-[#e0f2fe] flex items-center justify-center shrink-0">
+                    <LifeBuoy size={16} className="text-[#0369a1]" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-gray-900">{n.title}</p>
@@ -624,6 +665,8 @@ export default function AdminDashboard({ user, onSignOut }) {
   const certAlerts = notifications.items.filter((n) => n.kind === "certificate_submitted");
   // "A farmer's loan request needs its collateral checked" alerts.
   const loanAlerts = notifications.items.filter((n) => n.kind === "loan_submitted");
+  // "A farmer asked for disaster relief" alerts.
+  const claimAlerts = notifications.items.filter((n) => n.kind === "claim_submitted");
   const reloadNotifications = notifications.reload;
   useEffect(() => {
     // Check again every minute so a new submission shows up without a reload.
@@ -642,6 +685,12 @@ export default function AdminDashboard({ user, onSignOut }) {
     notifications.markRead(n.id);
     setStartOnCertificates(false);
     setActiveItem("Loan Collateral");
+  }
+
+  function handleOpenClaimAlert(n) {
+    notifications.markRead(n.id);
+    setStartOnCertificates(false);
+    setActiveItem("Calamity Claims");
   }
 
   const seenKey = "farmfund_admin_announcements_seen";
@@ -852,8 +901,10 @@ export default function AdminDashboard({ user, onSignOut }) {
             announcements={announcements}
             certAlerts={certAlerts}
             loanAlerts={loanAlerts}
+            claimAlerts={claimAlerts}
             onOpenCertAlert={handleOpenCertAlert}
             onOpenLoanAlert={handleOpenLoanAlert}
+            onOpenClaimAlert={handleOpenClaimAlert}
             onOpened={reloadNotifications}
             onMarkAllRead={handleMarkAllAnnouncementsRead}
             onDismiss={handleDismissAnnouncement}
@@ -888,6 +939,8 @@ export default function AdminDashboard({ user, onSignOut }) {
           <UserManagement key={certNavKey} onSignOut={onSignOut} startOnCertificates={startOnCertificates} />
         ) : activeItem === "Loan Collateral" ? (
           <LoanCollateralReview onSignOut={onSignOut} onReviewed={reloadNotifications} />
+        ) : activeItem === "Calamity Claims" ? (
+          <CalamityClaims onSignOut={onSignOut} onReviewed={reloadNotifications} />
         ) : activeItem === "Farm Management" ? (
           <FarmManagement onSignOut={onSignOut} />
         ) : activeItem === "User Activity" ? (

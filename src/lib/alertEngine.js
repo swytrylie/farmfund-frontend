@@ -61,7 +61,7 @@ export async function computeAlerts() {
     // --- Loan alerts: active loans due within 14 days, or already overdue ---
     const now = new Date();
     for (const loan of loans) {
-      if (loan.status !== "active" || !loan.dueDate) continue;
+      if ((loan.status !== "active" && loan.status !== "grace_period") || !loan.dueDate) continue;
       const due = new Date(loan.dueDate);
       const daysUntilDue = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
       if (daysUntilDue > 14) continue;

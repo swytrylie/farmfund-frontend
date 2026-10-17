@@ -45,7 +45,7 @@ function KPICard({ label, value, valueColor }) {
 
 function RecordPaymentModal({ loans, onSubmit, onCancel }) {
   const eligible = loans
-    .filter((l) => (l.status === "active" || l.status === "defaulted") && l.remainingBalance > 0)
+    .filter((l) => (l.status === "active" || l.status === "grace_period" || l.status === "defaulted") && l.remainingBalance > 0)
     .sort((a, b) => personName(a.farmer).localeCompare(personName(b.farmer)));
 
   const [loanId, setLoanId] = useState(eligible[0]?._id || "");
@@ -206,7 +206,7 @@ function ReviewProofModal({ proof, loan, onVerify, onReject, onCancel }) {
   const [error, setError] = useState("");
 
   const before = loan ? loan.remainingBalance : null;
-  const loanPayable = loan ? loan.status === "active" || loan.status === "defaulted" : true;
+  const loanPayable = loan ? loan.status === "active" || loan.status === "grace_period" || loan.status === "defaulted" : true;
   const overBalance = before !== null && proof.amount > before + 0.001;
   const after = before === null ? null : Math.max(0, round2(before - proof.amount));
   const noteOk = note.trim().length >= 3;
@@ -577,7 +577,7 @@ export default function RepaymentTracking() {
     })
     .reduce((s, p) => s + p.amount, 0);
   const outstanding = loans
-    .filter((l) => l.status === "active" || l.status === "defaulted")
+    .filter((l) => l.status === "active" || l.status === "grace_period" || l.status === "defaulted")
     .reduce((s, l) => s + l.remainingBalance, 0);
 
   return (

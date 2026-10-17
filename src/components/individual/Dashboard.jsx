@@ -190,6 +190,7 @@ const LOAN_STATUS_STYLE = {
   pending: { label: "Pending review", className: "text-amber-700 bg-amber-100" },
   approved: { label: "Approved", className: "text-blue-700 bg-blue-100" },
   active: { label: "Active", className: "text-green-700 bg-green-100" },
+  grace_period: { label: "Grace period", className: "text-teal-700 bg-teal-100" },
   paid_off: { label: "Paid off", className: "text-emerald-700 bg-emerald-100" },
   defaulted: { label: "Defaulted", className: "text-red-700 bg-red-100" },
   rejected: { label: "Rejected", className: "text-gray-500 bg-gray-100" },
@@ -338,7 +339,7 @@ function DashboardHome({ user, onNavigate }) {
         ]);
         if (cancelled) return;
         setRecords(recordsData);
-        setLoans(loansData.filter((l) => l.status === "active" || l.status === "approved"));
+        setLoans(loansData.filter((l) => l.status === "active" || l.status === "grace_period" || l.status === "approved"));
       } catch (err) {
         if (!cancelled) setLoadError(err.message || "Failed to load your data.");
       } finally {

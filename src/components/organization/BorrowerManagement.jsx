@@ -25,6 +25,7 @@ const LOAN_STATUS_LABEL = {
   pending: "Pending review",
   approved: "Approved",
   active: "Active",
+  grace_period: "Grace period",
   paid_off: "Paid off",
   defaulted: "Defaulted",
   rejected: "Rejected",
@@ -37,7 +38,7 @@ function computeBorrowerStatus(loans) {
   const now = new Date();
   const hasOverdue = loans.some((l) => l.status === "active" && l.dueDate && new Date(l.dueDate) < now);
   if (hasOverdue) return "overdue";
-  if (loans.some((l) => l.status === "active")) return "active";
+  if (loans.some((l) => l.status === "active" || l.status === "grace_period")) return "active";
   if (loans.some((l) => l.status === "pending")) return "pending";
   return "clear";
 }

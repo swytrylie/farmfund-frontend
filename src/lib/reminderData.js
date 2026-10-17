@@ -32,7 +32,7 @@ export function daysOverdue(dueDate, now = new Date()) {
 // A reminder only makes sense for a loan that's actually out and still owes
 // something — not one that's pending, rejected, or already paid off.
 export function canRemind(loan) {
-  return (loan.status === "active" || loan.status === "defaulted") && loan.remainingBalance > 0;
+  return (loan.status === "active" || loan.status === "grace_period" || loan.status === "defaulted") && loan.remainingBalance > 0;
 }
 
 export function isOverdue(loan, now = new Date()) {

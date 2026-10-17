@@ -29,7 +29,7 @@ export const PERIOD_OPTIONS = [
   { key: "ytd", chip: "Year to date" },
 ];
 
-const DISBURSED = ["active", "paid_off", "defaulted"];
+const DISBURSED = ["active", "grace_period", "paid_off", "defaulted"];
 const sum = (items, pick) => round2(items.reduce((s, x) => s + pick(x), 0));
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const monthLabel = (d) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -80,7 +80,7 @@ const BAD = "text-red-700 font-medium";
 
 function outstandingLoansReport(loans, now) {
   const disbursed = loans.filter((l) => DISBURSED.includes(l.status));
-  const stillOut = loans.filter((l) => (l.status === "active" || l.status === "defaulted") && l.remainingBalance > 0);
+  const stillOut = loans.filter((l) => (l.status === "active" || l.status === "grace_period" || l.status === "defaulted") && l.remainingBalance > 0);
   const overdueCount = stillOut.filter((l) => isOverdue(l, now)).length;
 
   const principal = sum(disbursed, (l) => l.principalAmount);
@@ -263,7 +263,7 @@ export function buildReport(key, { loans, payments, now = new Date(), period }) 
 // What shows under each card's title.
 export function cardSubtitle(card, { loans, now = new Date(), period }) {
   if (card.key === "outstanding-loans") {
-    const active = loans.filter((l) => (l.status === "active" || l.status === "defaulted") && l.remainingBalance > 0).length;
+    const active = loans.filter((l) => (l.status === "active" || l.status === "grace_period" || l.status === "defaulted") && l.remainingBalance > 0).length;
     return plural(active, "active loan");
   }
   if (card.key === "overdue-debts") return plural(loans.filter((l) => isOverdue(l, now)).length, "account");

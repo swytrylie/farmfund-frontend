@@ -3,7 +3,7 @@ import { authedRequest } from "../../api";
 import { peso, round2, personName, fetchAllPages } from "../../lib/repaymentData";
 import { isOverdue, daysOverdue, canRemind } from "../../lib/reminderData";
 
-const DISBURSED = ["active", "paid_off", "defaulted"];
+const DISBURSED = ["active", "grace_period", "paid_off", "defaulted"];
 const DUE_SOON_DAYS = 7;
 const MAX_ATTENTION_ITEMS = 5;
 const sum = (items, pick) => round2(items.reduce((s, x) => s + pick(x), 0));

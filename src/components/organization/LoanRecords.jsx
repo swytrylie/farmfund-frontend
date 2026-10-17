@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { Clock, AlertTriangle, CheckCircle2, XCircle, Info } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle2, XCircle, Info, Hourglass, LifeBuoy, Snowflake, X } from "lucide-react";
 import { authedRequest } from "../../api";
 import LoanBasis from "../shared/LoanBasis";
 import { rateText, termText, isCycleLoan } from "../../lib/loans";
+import { activateFreeze, openClaimProof, isRunning } from "../../lib/calamity";
+import { dateLocal } from "../../lib/certificates";
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
@@ -19,6 +21,7 @@ const STATUS_CONFIG = {
   pending: { label: "Pending review", Icon: Clock, iconColor: "text-amber-500", card: "border-2 border-[#4f7331] bg-white" },
   approved: { label: "Approved", Icon: CheckCircle2, iconColor: "text-blue-500", card: "border border-gray-200 bg-white" },
   active: { label: "Active", Icon: Clock, iconColor: "text-amber-500", card: "border border-gray-200 bg-white" },
+  grace_period: { label: "Grace period", Icon: Hourglass, iconColor: "text-teal-600", card: "border border-teal-200 bg-white" },
   paid_off: { label: "Paid off", Icon: CheckCircle2, iconColor: "text-emerald-600", card: "border border-emerald-200 bg-[#f4f8f3]" },
   defaulted: { label: "Defaulted", Icon: AlertTriangle, iconColor: "text-red-500", card: "border border-red-200 bg-red-50" },
   rejected: { label: "Rejected", Icon: XCircle, iconColor: "text-gray-400", card: "border border-gray-200 bg-gray-50" },
@@ -52,10 +55,94 @@ function LoanCard({ loan, isSelected, onSelect }) {
   );
 }
 
+// A disaster relief claim that a FarmFund admin already verified. The cooperative
+// only sees it from that point on. Only the owner gets the freeze button.
+function ReliefCard({ loan, onFreeze }) {
+  const relief = loan.relief;
+  const claim = relief && relief.claim;
+  const [proofError, setProofError] = useState("");
+  if (!claim) return null;
+  const fr = claim.freeze;
+
+  async function viewProof() {
+    setProofError("");
+    try {
+      await openClaimProof(claim.id);
+    } catch (err) {
+      setProofError(err.message || "Couldn't open the proof. Please try again.");
+    }
+  }
+
+  return (
+    <div data-testid="relief-card" className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4">
+      <div className="flex items-center gap-2 text-sm font-bold text-sky-900">
+        <LifeBuoy size={15} className="shrink-0" />
+        Disaster relief claim: {claim.calamityLabel}
+      </div>
+      <p className="mt-1 text-xs text-sky-800">
+        A FarmFund admin checked the farmer's proof and verified it on {dateLocal(claim.review?.reviewedAt || claim.createdAt)}.
+      </p>
+      {claim.description && <p className="mt-2 text-sm text-gray-700 whitespace-pre-line">{claim.description}</p>}
+      {claim.hasFile && (
+        <button onClick={viewProof} className="mt-2 text-xs font-semibold text-sky-800 underline hover:text-sky-950">
+          View proof
+        </button>
+      )}
+      {proofError && <p className="mt-1 text-xs text-red-600">{proofError}</p>}
+
+      {fr ? (
+        <p data-testid="freeze-info" className="mt-3 rounded-lg bg-white border border-sky-200 px-3 py-2 text-xs text-sky-900">
+          <Snowflake size={12} className="inline mr-1 -mt-0.5" />
+          {fr.running ? "Calamity freeze active" : "Calamity freeze ended"}: no new interest until {dateLocal(fr.endsAt)}. Due date moved from{" "}
+          {dateLocal(fr.previousDueDate)} to {dateLocal(fr.newDueDate)}.
+        </p>
+      ) : relief.canFreeze ? (
+        <button
+          onClick={onFreeze}
+          className="mt-3 px-4 py-2 rounded-xl bg-sky-700 text-white text-sm font-semibold hover:bg-sky-800 transition-colors"
+        >
+          Activate calamity freeze
+        </button>
+      ) : (
+        <p className="mt-3 text-xs text-sky-800">Only the cooperative's owner can activate the calamity freeze.</p>
+      )}
+    </div>
+  );
+}
+
+function FreezeModal({ loan, busy, error, onConfirm, onClose }) {
+  const name = loan.farmer ? `${loan.farmer.firstName} ${loan.farmer.lastName}` : "the farmer";
+  const close = () => {
+    if (!busy) onClose();
+  };
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={close}>
+      <div role="dialog" aria-label="Activate calamity freeze" className="bg-white rounded-3xl p-7 max-w-md w-full shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
+        <button onClick={close} className="absolute top-5 right-5 text-gray-400 hover:text-gray-600" aria-label="Close">
+          <X size={18} />
+        </button>
+        <h3 className="text-lg font-bold text-gray-900">Activate the calamity freeze?</h3>
+        <p className="text-sm text-gray-500 mt-2">
+          {name}'s due date moves 90 days later and no new interest is added during that time. {name} gets a message now and another when the freeze ends. This cannot be undone.
+        </p>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-3 mt-5">
+          <button onClick={close} disabled={busy} className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-60">
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={busy} className="px-5 py-2 rounded-xl bg-sky-700 text-white text-sm font-semibold hover:bg-sky-800 disabled:opacity-60">
+            {busy ? "Working…" : "Activate freeze"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Shows only real, verified fields — no "outstanding balance" or "total
 // paid" chart, since there's no real payment-recording flow yet
 // (LoanPayment is read-only: payment gateway integration isn't finalized).
-function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
+function LoanDetailPanel({ loan, onUpdateStatus, updating, onFreeze }) {
   const config = STATUS_CONFIG[loan.status] || STATUS_CONFIG.pending;
   const borrowerName = loan.farmer ? `${loan.farmer.firstName} ${loan.farmer.lastName}` : "Unknown farmer";
 
@@ -94,7 +181,14 @@ function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
         </div>
       )}
 
-      {(loan.status === "active" || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
+      {loan.status === "grace_period" && (
+        <div data-testid="grace-note" className="mt-4 bg-teal-50 border border-teal-200 rounded-xl p-3 flex items-center gap-2 text-sm text-teal-900">
+          <Hourglass size={14} className="shrink-0" />
+          <span>The harvest date has passed. This loan is in its grace period until {dateLocal(loan.graceEndsAt || loan.dueDate)}. The farmer can still pay.</span>
+        </div>
+      )}
+
+      {(isRunning(loan) || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
         <div className="mt-4 bg-[#fff8ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm">
           <Info size={14} className="text-amber-700 shrink-0" />
           <span>
@@ -104,6 +198,8 @@ function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
           </span>
         </div>
       )}
+
+      <ReliefCard loan={loan} onFreeze={onFreeze} />
 
       {loan.status === "pending" && (
         <div className="mt-6 flex items-center gap-3">
@@ -157,6 +253,9 @@ export default function LoanRecords() {
   const [selectedId, setSelectedId] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [updatingId, setUpdatingId] = useState(null);
+  const [freezeLoanId, setFreezeLoanId] = useState(null);
+  const [freezeBusy, setFreezeBusy] = useState(false);
+  const [freezeError, setFreezeError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +294,23 @@ export default function LoanRecords() {
     }
   }
 
+  async function handleFreeze() {
+    const loan = loans.find((l) => l._id === freezeLoanId);
+    const claimId = loan && loan.relief && loan.relief.claim ? loan.relief.claim.id : null;
+    if (!claimId || freezeBusy) return;
+    setFreezeBusy(true);
+    setFreezeError("");
+    try {
+      const updated = await activateFreeze(claimId);
+      setLoans((prev) => prev.map((l) => (l._id === updated._id ? { ...l, ...updated } : l)));
+      setFreezeLoanId(null);
+    } catch (err) {
+      setFreezeError(err.message || "Couldn't activate the freeze. Please try again.");
+    } finally {
+      setFreezeBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div>
@@ -226,9 +342,9 @@ export default function LoanRecords() {
   const selectedLoan = loans.find((l) => l._id === selectedId) || null;
 
   const pendingCount = loans.filter((l) => l.status === "pending").length;
-  const activeCount = loans.filter((l) => l.status === "active" || l.status === "approved").length;
+  const activeCount = loans.filter((l) => isRunning(l) || l.status === "approved").length;
   const totalPrincipal = loans
-    .filter((l) => l.status === "active" || l.status === "approved")
+    .filter((l) => isRunning(l) || l.status === "approved")
     .reduce((s, l) => s + l.principalAmount, 0);
 
   return (
@@ -247,7 +363,7 @@ export default function LoanRecords() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        {["all", "pending", "approved", "active", "paid_off", "rejected"].map((key) => (
+        {["all", "pending", "approved", "active", "grace_period", "paid_off", "rejected"].map((key) => (
           <button
             key={key}
             onClick={() => setStatusFilter(key)}
@@ -282,6 +398,10 @@ export default function LoanRecords() {
               loan={selectedLoan}
               onUpdateStatus={handleUpdateStatus}
               updating={updatingId === selectedLoan._id}
+              onFreeze={() => {
+                setFreezeError("");
+                setFreezeLoanId(selectedLoan._id);
+              }}
             />
           ) : (
             <div className="bg-white border border-gray-200 rounded-2xl p-12 flex items-center justify-center min-h-[200px] shadow-sm">
@@ -290,6 +410,15 @@ export default function LoanRecords() {
           )}
         </div>
       </div>
+      {freezeLoanId && loans.find((l) => l._id === freezeLoanId) && (
+        <FreezeModal
+          loan={loans.find((l) => l._id === freezeLoanId)}
+          busy={freezeBusy}
+          error={freezeError}
+          onConfirm={handleFreeze}
+          onClose={() => setFreezeLoanId(null)}
+        />
+      )}
     </div>
   );
 }

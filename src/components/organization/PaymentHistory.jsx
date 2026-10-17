@@ -7,9 +7,10 @@ const money = (n) => (typeof n === "number" ? peso(n) : "—");
 const formatDate = (iso) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-const LOAN_STATUS_LABEL = { active: "Active", paid_off: "Paid off", defaulted: "Defaulted" };
+const LOAN_STATUS_LABEL = { active: "Active", grace_period: "Grace period", paid_off: "Paid off", defaulted: "Defaulted" };
 const LOAN_STATUS_STYLE = {
   active: "bg-green-100 text-green-800",
+  grace_period: "bg-teal-100 text-teal-800",
   paid_off: "bg-emerald-100 text-emerald-800",
   defaulted: "bg-red-100 text-red-700",
 };
@@ -81,7 +82,7 @@ export default function PaymentHistory() {
         // history: still-pending, approved-but-not-yet-disbursed, and
         // rejected loans never will.
         const withHistory = all
-          .filter((l) => ["active", "paid_off", "defaulted"].includes(l.status))
+          .filter((l) => ["active", "grace_period", "paid_off", "defaulted"].includes(l.status))
           .sort((a, b) => personName(a.farmer).localeCompare(personName(b.farmer)) || String(a._id).localeCompare(String(b._id)));
         setLoans(withHistory);
         setSelectedLoanId(withHistory[0]?._id || "");

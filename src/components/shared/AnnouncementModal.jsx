@@ -84,6 +84,7 @@ export default function AnnouncementModal({ item, onClose }) {
             {d.typeLabel && <Row label="Update">{d.typeLabel}</Row>}
             {d.amount !== null && d.amount !== undefined && <Row label="Loan amount">{pesoText(d.amount)}</Row>}
             {d.coopName && <Row label="Cooperative">{d.coopName}</Row>}
+            {d.dueDate && <Row label="Due date">{`${formatAnnouncementDate(d.dueDate)}${d.dueNote ? ` (${d.dueNote})` : ""}`}</Row>}
             {d.reason && <Row label="Reason">{d.reason}</Row>}
           </div>
         )}
