@@ -1,8 +1,23 @@
 import { useState, useEffect, useRef } from "react";
 import { Clock, CheckCircle2, XCircle, AlertTriangle, Info, Plus, Wallet, X, Paperclip, Eye } from "lucide-react";
 import { authedRequest } from "../../api";
+import LoanBasis from "../shared/LoanBasis";
 import { sanitizeAmount, displayAmount, todayLocalISO, loanRef, METHOD_LABEL } from "../../lib/repaymentData";
 import { ACCEPT, MAX_FILE_BYTES, fileProblem, bytesText, messageFrom, dateLocal, getCredit, CREDIT_LIMIT_AMOUNT } from "../../lib/certificates";
+import {
+  getLoanOptions,
+  requestLoan,
+  openCollateralFile,
+  DESCRIPTION_MIN,
+  DESCRIPTION_MAX,
+  cleanDescription,
+  growingText,
+  isCycleLoan,
+  rateText,
+  termText,
+  interestAmount,
+  estimatedDue,
+} from "../../lib/loans";
 import {
   PROOF_METHODS,
   PROOF_METHOD_LABEL,
@@ -60,6 +75,7 @@ function LoanSelectorCard({ loan, isSelected, onSelect, waitingProofs = 0 }) {
         Requested {new Date(loan.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
       </p>
 
+      {loan.cropLabel && <p className="text-xs text-gray-500 mt-0.5">{loan.cropLabel}</p>}
       <div className="mt-2 flex items-center justify-between text-xs">
         <span className="text-gray-500">{config.label}</span>
         <span className="text-gray-700 font-medium">
@@ -158,8 +174,8 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
   const hasBalance = typeof loan.totalPayable === "number" && ["active", "defaulted", "paid_off"].includes(loan.status);
   const stats = [
     { label: "Principal", value: peso(loan.principalAmount), color: "text-gray-900" },
-    { label: "Interest Rate", value: `${loan.interestRatePercent}% p.a.`, color: "text-gray-900" },
-    { label: "Term", value: `${loan.termMonths} months`, color: "text-gray-900" },
+    { label: "Interest Rate", value: rateText(loan), color: "text-gray-900" },
+    { label: isCycleLoan(loan) ? "Repayment period" : "Term", value: termText(loan), color: "text-gray-900" },
     { label: "Status", value: config.label, color: "text-gray-900" },
   ];
   const balanceStats = hasBalance
@@ -185,6 +201,7 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
           </div>
         ))}
       </div>
+      <LoanBasis loan={loan} />
       {balanceStats.length > 0 && (
         <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
           {balanceStats.map((s) => (
@@ -208,10 +225,13 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
           Approved. You can start paying once {loan.cooperative?.name || "the cooperative"} releases the loan.
         </div>
       )}
-      {loan.status === "active" && loan.dueDate && (
-        <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900">
+      {(loan.status === "active" || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
+        <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900" data-testid="due-banner">
           <Info size={14} className="shrink-0" />
-          Due {new Date(loan.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          <span>
+            Due {new Date(loan.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            {isCycleLoan(loan) && <span className="font-normal"> — you can pay any time before then, but it must be fully paid by this date.</span>}
+          </span>
         </div>
       )}
       {loan.status === "rejected" && (
@@ -281,22 +301,72 @@ function CreditBanner({ credit }) {
 
 // Requests a real loan from a real, active cooperative — status is always
 // decided by the backend (forced to "pending" there regardless of anything
-// sent here), so there's nothing to pick for that on this form.
+// sent here), so there's nothing to pick for that on this form. The farmer
+// chooses a crop and puts up collateral (with a proof file); the server works
+// out the interest rate from the collateral and the due date from the crop's
+// growing time, so neither is typed here. The summary below is only a preview.
 function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
+  const [options, setOptions] = useState(null);
+  const [optionsError, setOptionsError] = useState("");
   const [cooperative, setCooperative] = useState(cooperatives[0]?._id || "");
   const [principalAmount, setPrincipalAmount] = useState("");
-  const [interestRatePercent, setInterestRatePercent] = useState("");
-  const [termMonths, setTermMonths] = useState("12");
+  const [crop, setCrop] = useState("");
+  const [collateralType, setCollateralType] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState(null);
+  const [fileMsg, setFileMsg] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const fileInput = useRef(null);
   const cap = credit ? Math.min(credit.available, 500000) : 500000;
   const overLimit = Number(principalAmount) > cap;
 
-  async function handleSave() {
-    const principal = parseFloat(principalAmount);
-    const rate = parseFloat(interestRatePercent);
-    const term = parseInt(termMonths, 10);
+  function loadOptions() {
+    setOptionsError("");
+    getLoanOptions()
+      .then(setOptions)
+      .catch((err) => setOptionsError(messageFrom(err, "Could not load the crops and collateral choices.")));
+  }
+  useEffect(() => {
+    loadOptions();
+  }, []);
 
+  useEffect(() => {
+    if (!file || !/^image\//.test(file.type) || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const cropOption = options && crop ? options.crops.find((c) => c.key === crop) : null;
+  const collateralOption = options && collateralType ? options.collateral.find((c) => c.key === collateralType) : null;
+  const principal = Number(principalAmount) || 0;
+  const descriptionLength = description.trim().length;
+  const descriptionOk = descriptionLength >= DESCRIPTION_MIN;
+  const showSummary = Boolean(cropOption && collateralOption && principal > 0);
+  const interest = showSummary ? interestAmount(principal, collateralOption.ratePercent) : 0;
+
+  const canSubmit =
+    !saving && !preparing && !!options && !!cooperative && principal > 0 && !overLimit && !!cropOption && !!collateralOption && descriptionOk && !!file && !fileMsg;
+
+  async function handlePick(e) {
+    const picked = e.target.files && e.target.files[0];
+    if (!picked) return;
+    setError("");
+    setPreparing(true);
+    const ready = await prepareReceipt(picked);
+    setPreparing(false);
+    const problem = fileProblem(ready);
+    setFileMsg(problem);
+    setFile(problem ? null : ready);
+  }
+
+  async function handleSave() {
     if (!cooperative) {
       setError("Select a cooperative.");
       return;
@@ -313,43 +383,69 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
       );
       return;
     }
-    if (rate === undefined || isNaN(rate) || rate < 0 || rate > 100) {
-      setError("Enter an interest rate between 0 and 100.");
+    if (!cropOption) {
+      setError("Choose the crop this loan is for.");
       return;
     }
-    if (!term || term < 1 || term > 120) {
-      setError("Enter a term between 1 and 120 months.");
+    if (!collateralOption) {
+      setError("Choose what you are putting up as collateral.");
+      return;
+    }
+    if (!descriptionOk) {
+      setError(`Describe your collateral (at least ${DESCRIPTION_MIN} characters).`);
+      return;
+    }
+    if (!file) {
+      setError("Upload a photo or PDF as proof of your collateral.");
       return;
     }
 
     setSaving(true);
     setError("");
     try {
-      const newLoan = await authedRequest("/api/loans", {
-        method: "POST",
-        body: { cooperative, principalAmount: principal, interestRatePercent: rate, termMonths: term },
-      });
+      const body = new FormData();
+      body.append("cooperative", cooperative);
+      body.append("principalAmount", String(principal));
+      body.append("crop", crop);
+      body.append("collateralType", collateralType);
+      body.append("collateralDescription", description.trim());
+      body.append("file", file);
+      const newLoan = await requestLoan(body);
       onSave(newLoan);
     } catch (err) {
-      setError(err.message || "Something went wrong. Please try again.");
+      setError(messageFrom(err, "Something went wrong. Please try again."));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onCancel}>
-      <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-xl space-y-4" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={saving ? undefined : onCancel}>
+      <div
+        role="dialog"
+        aria-label="Request a Loan"
+        className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-xl space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3 className="text-xl font-bold text-gray-900">Request a Loan</h3>
 
+        {optionsError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-600 flex items-center justify-between gap-3">
+            <span>{optionsError}</span>
+            <button type="button" onClick={loadOptions} className="font-semibold underline shrink-0">
+              Try again
+            </button>
+          </div>
+        )}
+
         <div>
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Cooperative *</label>
+          <label htmlFor="rl-coop" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Cooperative *</label>
           {cooperatives.length === 0 ? (
             <p className="text-sm text-gray-400 bg-gray-50 rounded-xl px-4 py-3">
               No active cooperatives are available to request a loan from yet.
             </p>
           ) : (
-            <select value={cooperative} onChange={(e) => setCooperative(e.target.value)} className={selectClass}>
+            <select id="rl-coop" value={cooperative} onChange={(e) => setCooperative(e.target.value)} className={selectClass}>
               {cooperatives.map((c) => (
                 <option key={c._id} value={c._id}>
                   {c.name}
@@ -360,12 +456,13 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Principal Amount (PHP) *</label>
+          <label htmlFor="rl-amount" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Principal Amount (PHP) *</label>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium pointer-events-none">
               ₱
             </span>
             <input
+              id="rl-amount"
               type="text"
               inputMode="numeric"
               value={principalAmount ? Number(principalAmount).toLocaleString("en-US") : ""}
@@ -393,40 +490,146 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Interest Rate (% p.a.) *</label>
-            <input
-              type="number"
-              value={interestRatePercent}
-              onChange={(e) => setInterestRatePercent(e.target.value)}
-              placeholder="e.g., 12"
-              max={100}
-              className={selectClass}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Term (months) *</label>
-            <select value={termMonths} onChange={(e) => setTermMonths(e.target.value)} className={selectClass}>
-              {[6, 12, 24, 36, 60].map((m) => (
-                <option key={m} value={m}>
-                  {m} months
+        <div>
+          <label htmlFor="rl-crop" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Crop you will grow *</label>
+          <select id="rl-crop" value={crop} onChange={(e) => setCrop(e.target.value)} disabled={!options} className={selectClass}>
+            <option value="">{options ? "Select a crop" : "Loading crops…"}</option>
+            {options &&
+              options.crops.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                  {c.examples ? ` (${c.examples})` : ""}
                 </option>
               ))}
-            </select>
-          </div>
+          </select>
+          {cropOption ? (
+            <p className="mt-1 text-[11px] text-gray-500" data-testid="growing-time">
+              Growing time: <span className="font-semibold text-gray-700">{growingText(cropOption.growingDays)}</span>. Your payment is due {options.graceDays} days after it ends.
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-gray-400">How long the crop takes to grow decides when you pay back.</p>
+          )}
         </div>
 
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        <div>
+          <label htmlFor="rl-collateral" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Collateral *</label>
+          <select id="rl-collateral" value={collateralType} onChange={(e) => setCollateralType(e.target.value)} disabled={!options} className={selectClass}>
+            <option value="">{options ? "Select what you are putting up" : "Loading…"}</option>
+            {options &&
+              options.collateral.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label} — {c.ratePercent}% interest
+                </option>
+              ))}
+          </select>
+          <p className="mt-1 text-[11px] text-gray-400">The interest rate depends on your collateral. It is a flat percentage for the whole crop cycle.</p>
+        </div>
+
+        <div>
+          <label htmlFor="rl-collateral-desc" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Collateral description *</label>
+          <textarea
+            id="rl-collateral-desc"
+            rows={3}
+            value={description}
+            maxLength={DESCRIPTION_MAX}
+            onChange={(e) => setDescription(cleanDescription(e.target.value))}
+            placeholder="e.g. Two carabaos, ear-tagged, kept at my farm in Brgy. San Isidro"
+            className={`${selectClass} resize-none`}
+          />
+          <p className={`mt-1 text-[11px] ${description && !descriptionOk ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+            {description && !descriptionOk
+              ? `Write at least ${DESCRIPTION_MIN} characters`
+              : `What it is, how many, where it is. ${descriptionLength}/${DESCRIPTION_MAX}`}
+          </p>
+        </div>
+
+        <div>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Proof of collateral *</span>
+          <input
+            ref={fileInput}
+            type="file"
+            accept={ACCEPT}
+            onChange={handlePick}
+            onClick={(e) => {
+              e.currentTarget.value = ""; // so choosing the same file again still counts as a change
+            }}
+            className="hidden"
+            aria-label="Collateral proof file"
+            data-testid="collateral-input"
+          />
+          {file ? (
+            <div className="flex items-center gap-3 border border-gray-200 rounded-xl p-2.5">
+              {previewUrl ? (
+                <img src={previewUrl} alt="Collateral preview" className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+              ) : (
+                <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">PDF</span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
+                <p className="text-xs text-gray-400">{bytesText(file.size)}</p>
+              </div>
+              <button type="button" onClick={() => fileInput.current?.click()} className="text-xs text-[#4f7331] font-medium hover:underline">
+                Change
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={preparing}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-xl py-4 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Paperclip size={16} /> {preparing ? "Getting your photo ready…" : "Choose a photo or PDF as proof"}
+            </button>
+          )}
+          <p className={`mt-1 text-[11px] ${fileMsg ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+            {fileMsg || `A land title, a photo of the animals or equipment, or a receipt. JPG, PNG or PDF, up to ${bytesText(MAX_FILE_BYTES)}.`}
+          </p>
+        </div>
+
+        {showSummary && (
+          <div className="bg-[#f4f8f3] border border-green-100 rounded-xl px-4 py-3 text-sm" data-testid="loan-summary">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Your loan at a glance</p>
+            <dl className="mt-2 space-y-1.5">
+              <div className="flex justify-between gap-4">
+                <dt className="text-gray-500">Interest rate</dt>
+                <dd className="font-semibold text-gray-900">{collateralOption.ratePercent}% for the crop cycle</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-gray-500">Interest</dt>
+                <dd className="font-semibold text-gray-900">{peso(interest)}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-gray-500">Total to pay back</dt>
+                <dd className="font-bold text-gray-900">{peso(principal + interest)}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-gray-500">Payment due</dt>
+                <dd className="font-semibold text-gray-900">
+                  about {estimatedDue(cropOption.growingDays, options.graceDays).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-2 text-[11px] text-gray-500">
+              The due date counts from the day your cooperative approves the loan. You can pay any time before it, but the full amount must be paid by the due date.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <p role="alert" className="text-xs text-red-500">
+            {error}
+          </p>
+        )}
 
         <div className="flex items-center justify-end gap-3">
-          <button onClick={onCancel} className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+          <button onClick={onCancel} disabled={saving} className="px-5 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || cooperatives.length === 0}
-            className="px-6 py-2 rounded-xl bg-[#4f7331] text-white hover:bg-[#3f6238] transition-colors disabled:opacity-60"
+            disabled={!canSubmit || cooperatives.length === 0}
+            className="px-6 py-2 rounded-xl bg-[#4f7331] text-white hover:bg-[#3f6238] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? "Submitting…" : "Submit Request"}
           </button>

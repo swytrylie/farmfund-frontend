@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Clock, AlertTriangle, CheckCircle2, XCircle, Info } from "lucide-react";
 import { authedRequest } from "../../api";
+import LoanBasis from "../shared/LoanBasis";
+import { rateText, termText, isCycleLoan } from "../../lib/loans";
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
@@ -59,8 +61,8 @@ function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
 
   const stats = [
     { label: "Principal", value: peso(loan.principalAmount), color: "text-gray-900" },
-    { label: "Interest Rate", value: `${loan.interestRatePercent}% p.a.`, color: "text-gray-900" },
-    { label: "Term", value: `${loan.termMonths} months`, color: "text-gray-900" },
+    { label: "Interest Rate", value: rateText(loan), color: "text-gray-900" },
+    { label: isCycleLoan(loan) ? "Repayment period" : "Term", value: termText(loan), color: "text-gray-900" },
     { label: "Status", value: config.label, color: "text-gray-900" },
   ];
 
@@ -78,6 +80,13 @@ function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
         ))}
       </div>
 
+      {typeof loan.totalPayable === "number" && (
+        <p className="mt-2 text-xs text-gray-500">
+          Total to repay: <span className="font-semibold text-gray-700">{peso(loan.totalPayable)}</span> (principal plus interest)
+        </p>
+      )}
+      <LoanBasis loan={loan} />
+
       {loan.status === "pending" && (
         <div className="mt-4 bg-[#fff8ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm">
           <Info size={14} className="text-amber-700 shrink-0" />
@@ -85,7 +94,7 @@ function LoanDetailPanel({ loan, onUpdateStatus, updating }) {
         </div>
       )}
 
-      {loan.status === "active" && loan.dueDate && (
+      {(loan.status === "active" || (loan.status === "approved" && isCycleLoan(loan))) && loan.dueDate && (
         <div className="mt-4 bg-[#fff8ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm">
           <Info size={14} className="text-amber-700 shrink-0" />
           <span>

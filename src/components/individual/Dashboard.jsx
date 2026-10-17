@@ -35,6 +35,7 @@ import { authedRequest } from "../../api";
 import { computeAlerts, dismissAlertById } from "../../lib/alertEngine";
 import { useAnnouncements } from "../../lib/announcements";
 import { useNotifications } from "../../lib/notifications";
+import { rateText } from "../../lib/loans";
 
 // ---- Sidebar nav data ----
 const NAV_GROUPS = [
@@ -224,7 +225,7 @@ function ActiveLoansPanel({ loans, onManage }) {
                       {loan.cooperative?.name || "Cooperative"}
                     </p>
                     <p className="text-xs text-gray-400">
-                      ₱{loan.principalAmount.toLocaleString()} · {loan.interestRatePercent}% p.a.
+                      ₱{loan.principalAmount.toLocaleString()} · {rateText(loan)}
                     </p>
                   </div>
                   <span className={`text-[11px] font-semibold rounded-full px-2.5 py-1 ${style.className}`}>
