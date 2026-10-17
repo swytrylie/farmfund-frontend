@@ -34,7 +34,7 @@ import FarmProfile from "./FarmProfile";
 import { authedRequest } from "../../api";
 import { computeAlerts, dismissAlertById } from "../../lib/alertEngine";
 import { useAnnouncements } from "../../lib/announcements";
-import { useNotifications } from "../../lib/notifications";
+import { useNotifications, PERSONAL_KINDS } from "../../lib/notifications";
 import { rateText } from "../../lib/loans";
 
 // ---- Sidebar nav data ----
@@ -540,11 +540,11 @@ export default function Dashboard({ user, onSignOut }) {
   const unreadInbox = announcements.unreadCount + reminders.unreadCount;
   const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
   function handleOpenAnnouncement(a) {
-    if (a.kind === "payment_reminder" || a.kind === "certificate_verified") reminders.markRead(a.id);
+    if (PERSONAL_KINDS.includes(a.kind)) reminders.markRead(a.id);
     else announcements.markRead(a.id);
     setOpenedAnnouncement(a);
   }
-  // kind: "announcement" | "payment_reminder" | "certificate_verified" | undefined (= all)
+  // kind: "announcement" | "payment_reminder" | "certificate_verified" | "loan_update" | undefined (= all)
   function handleMarkAllInboxRead(kind) {
     if (!kind || kind === "announcement") announcements.markAllRead();
     if (!kind) reminders.markAllRead();

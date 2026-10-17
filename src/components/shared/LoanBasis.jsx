@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Eye } from "lucide-react";
 import { openCollateralFile, growingText } from "../../lib/loans";
-import { bytesText, messageFrom } from "../../lib/certificates";
+import { bytesText, messageFrom, dateLocal } from "../../lib/certificates";
 
 // What a loan is for and what backs it: the crop (with its growing time) and
 // the collateral (with its description and a button to open the proof file).
@@ -49,6 +49,11 @@ export default function LoanBasis({ loan }) {
             <span className="text-right font-semibold text-gray-900 min-w-0">{c.label}</span>
           </div>
           {c.description && <p className="mt-1 text-xs text-gray-600 whitespace-pre-wrap break-words">{c.description}</p>}
+          {loan.adminReview && loan.adminReview.status === "verified" && (
+            <p className="mt-1.5 text-[11px] text-emerald-700" data-testid="admin-verified-line">
+              Collateral proof verified by a FarmFund admin{loan.adminReview.reviewedAt ? ` on ${dateLocal(loan.adminReview.reviewedAt)}` : ""}.
+            </p>
+          )}
           {c.hasFile && (
             <div className="mt-2 flex items-center gap-3 flex-wrap">
               <button

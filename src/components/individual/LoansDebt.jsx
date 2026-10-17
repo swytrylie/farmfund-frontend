@@ -17,6 +17,8 @@ import {
   termText,
   interestAmount,
   estimatedDue,
+  isAwaitingAdmin,
+  wasNotVerified,
 } from "../../lib/loans";
 import {
   PROOF_METHODS,
@@ -39,6 +41,8 @@ const isPayable = (loan) => (loan.status === "active" || loan.status === "defaul
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
 const STATUS_CONFIG = {
+  pending_admin: { label: "Awaiting admin check", Icon: Clock, iconColor: "text-amber-500", card: "bg-white border-gray-100" },
+  admin_rejected: { label: "Not verified", Icon: XCircle, iconColor: "text-red-400", card: "bg-gray-50 border-gray-200" },
   pending: { label: "Pending review", Icon: Clock, iconColor: "text-amber-500", card: "bg-white border-gray-100" },
   approved: { label: "Approved", Icon: CheckCircle2, iconColor: "text-blue-500", card: "bg-white border-gray-100" },
   active: { label: "Active", Icon: Clock, iconColor: "text-amber-500", card: "border-2 border-[#4f7331] bg-white" },
@@ -213,10 +217,26 @@ function LoanDetailPanel({ loan, proofs, onViewProof, onWithdrawProof, withdrawi
         </div>
       )}
 
+      {isAwaitingAdmin(loan) && (
+        <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900" data-testid="awaiting-admin">
+          <Info size={14} className="shrink-0" />
+          A FarmFund admin is checking your collateral proof. After that, your request goes to {loan.cooperative?.name || "the cooperative"}.
+        </div>
+      )}
+      {wasNotVerified(loan) && (
+        <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800" data-testid="not-verified">
+          <p className="flex items-center gap-2 font-medium">
+            <XCircle size={14} className="shrink-0" />
+            A FarmFund admin could not verify your collateral proof, so this request was not sent to {loan.cooperative?.name || "the cooperative"}.
+          </p>
+          {loan.adminReview && loan.adminReview.note && <p className="mt-1.5 pl-6">Reason: {loan.adminReview.note}</p>}
+          <p className="mt-1.5 pl-6">You can send a new request with a clearer proof.</p>
+        </div>
+      )}
       {loan.status === "pending" && (
         <div className="mt-4 bg-[#fff7ed] border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-xs font-medium text-amber-900">
           <Info size={14} className="shrink-0" />
-          Waiting for {loan.cooperative?.name || "the cooperative"} to review this request.
+          Your collateral was verified. Waiting for {loan.cooperative?.name || "the cooperative"} to review this request.
         </div>
       )}
       {loan.status === "approved" && (
@@ -300,7 +320,7 @@ function CreditBanner({ credit }) {
 }
 
 // Requests a real loan from a real, active cooperative — status is always
-// decided by the backend (forced to "pending" there regardless of anything
+// decided by the backend (forced to "pending_admin" there regardless of anything
 // sent here), so there's nothing to pick for that on this form. The farmer
 // chooses a crop and puts up collateral (with a proof file); the server works
 // out the interest rate from the collateral and the due date from the crop's
@@ -615,6 +635,10 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
             </p>
           </div>
         )}
+
+        <p className="text-[11px] text-gray-500" data-testid="admin-first-note">
+          After you submit, a FarmFund admin checks your collateral proof first. Once it is verified, your request goes to the cooperative you chose.
+        </p>
 
         {error && (
           <p role="alert" className="text-xs text-red-500">
@@ -1048,7 +1072,7 @@ export default function LoansDebt() {
   // (An approved loan has not paid anything yet, so it owes its full amount.)
   const owing = loans.filter((l) => ["active", "approved", "defaulted"].includes(l.status));
   const totalOutstanding = owing.reduce((sum, l) => sum + (typeof l.remainingBalance === "number" ? l.remainingBalance : l.principalAmount), 0);
-  const pendingCount = loans.filter((l) => l.status === "pending").length;
+  const pendingCount = loans.filter((l) => l.status === "pending" || l.status === "pending_admin").length;
   const canPay = loans.some(isPayable);
   // Only block the button when we know the limit; if it could not be loaded the server still decides.
   const cannotRequest = Boolean(credit) && credit.available <= 0;

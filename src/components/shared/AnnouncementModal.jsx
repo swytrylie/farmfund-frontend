@@ -16,7 +16,7 @@ function Row({ label, children }) {
 // The full text of one message, opened from the bell or the list: an
 // announcement from the FarmFund team, a payment reminder from the person's
 // cooperative (shown with the facts it carried when it was sent), or a note
-// that an admin verified one of their certificates.
+// that an admin verified one of their certificates, or news about one of their loans.
 export default function AnnouncementModal({ item, onClose }) {
   useEffect(() => {
     function onKey(e) {
@@ -29,6 +29,7 @@ export default function AnnouncementModal({ item, onClose }) {
   const kind = messageKind(item);
   const reminder = kind === "payment_reminder";
   const certificate = kind === "certificate_verified";
+  const loanUpdate = kind === "loan_update";
   const ui = uiFor(item);
   const KindIcon = ui.Icon;
   const d = item.details || {};
@@ -76,6 +77,14 @@ export default function AnnouncementModal({ item, onClose }) {
           <div className="mt-4 bg-[#effaf3] border border-emerald-100 rounded-xl px-4 py-2 text-sm">
             {d.typeLabel && <Row label="Document">{d.typeLabel}</Row>}
             {d.amount !== null && d.amount !== undefined && <Row label="Credit limit">{pesoText(d.amount)}</Row>}
+          </div>
+        )}
+        {loanUpdate && (
+          <div className="mt-4 bg-[#eff6ff] border border-blue-100 rounded-xl px-4 py-2 text-sm">
+            {d.typeLabel && <Row label="Update">{d.typeLabel}</Row>}
+            {d.amount !== null && d.amount !== undefined && <Row label="Loan amount">{pesoText(d.amount)}</Row>}
+            {d.coopName && <Row label="Cooperative">{d.coopName}</Row>}
+            {d.reason && <Row label="Reason">{d.reason}</Row>}
           </div>
         )}
         {reminder && (

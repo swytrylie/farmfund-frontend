@@ -9,6 +9,7 @@ import {
   BarChart3,
   Megaphone,
   ShieldCheck,
+  Landmark,
   FileClock,
   DatabaseBackup,
   Archive,
@@ -41,6 +42,7 @@ import AuditLogs from "./AuditLogs";
 import BackupRecovery from "./BackupRecovery";
 import ArchiveManagement from "./ArchiveManagement";
 import SystemMonitoring from "./SystemMonitoring";
+import LoanCollateralReview from "./LoanCollateralReview";
 import { formatDate } from "../../lib/adminUsers";
 
 const NAV_GROUPS = [
@@ -56,6 +58,10 @@ const NAV_GROUPS = [
       { icon: Activity, label: "User Activity" },
       { icon: UserCheck, label: "Account Status" },
     ],
+  },
+  {
+    label: "Lending",
+    items: [{ icon: Landmark, label: "Loan Collateral" }],
   },
   {
     label: "Monitoring",
@@ -315,7 +321,7 @@ function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
   );
 }
 
-function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpened }) {
+function AdminBell({ announcements, certAlerts = [], loanAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpenLoanAlert, onOpened }) {
   const [isOpen, setIsOpen] = useState(false);
   // Tracked separately from the real announcements data — dismissing a
   // card here only hides it from THIS popup. The actual sent-announcement
@@ -326,8 +332,10 @@ function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, o
 
   const visibleAnnouncements = announcements.filter((a) => !dismissedIds.has(a.id));
   const recentAnnouncements = visibleAnnouncements.slice(0, 5);
-  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread);
+  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread) || loanAlerts.some((n) => n.unread);
   const recentCertAlerts = certAlerts.slice(0, 5);
+  const recentLoanAlerts = loanAlerts.slice(0, 5);
+  const noAlerts = recentCertAlerts.length === 0 && recentLoanAlerts.length === 0;
 
   function handleDismiss(id) {
     setDismissedIds((prev) => new Set(prev).add(id));
@@ -347,6 +355,11 @@ function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, o
   function handleOpenCert(n) {
     setIsOpen(false);
     onOpenCertAlert(n);
+  }
+
+  function handleOpenLoan(n) {
+    setIsOpen(false);
+    onOpenLoanAlert?.(n);
   }
 
   return (
@@ -383,6 +396,36 @@ function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, o
           </div>
 
           <div className="px-3 py-2 space-y-2 max-h-80 overflow-y-auto">
+            {recentLoanAlerts.length > 0 && (
+              <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Loan collateral to verify</p>
+            )}
+            {recentLoanAlerts.map((n) => (
+              <div key={n.id} className="relative bg-[#eff6ff] rounded-xl p-3.5">
+                {n.unread && <span className="absolute top-3.5 left-3 w-2 h-2 rounded-full bg-green-500" />}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Review loan: ${n.message}`}
+                  onClick={() => handleOpenLoan(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenLoan(n);
+                    }
+                  }}
+                  className="flex items-start gap-3 pl-4 cursor-pointer"
+                >
+                  <span className="w-8 h-8 rounded-lg bg-[#dbeafe] flex items-center justify-center shrink-0">
+                    <Landmark size={16} className="text-[#1d4ed8]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-900">{n.title}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 break-words">{n.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{timeAgo(n.at)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
             {recentCertAlerts.length > 0 && (
               <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Certificates to verify</p>
             )}
@@ -413,11 +456,11 @@ function AdminBell({ announcements, certAlerts = [], onMarkAllRead, onDismiss, o
                 </div>
               </div>
             ))}
-            {recentCertAlerts.length > 0 && recentAnnouncements.length > 0 && (
+            {!noAlerts && recentAnnouncements.length > 0 && (
               <p className="px-1 pt-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Announcements</p>
             )}
             {recentAnnouncements.length === 0 ? (
-              recentCertAlerts.length === 0 && (
+              noAlerts && (
                 <p className="text-sm text-gray-400 text-center py-6">No announcements sent yet.</p>
               )
             ) : (
@@ -579,6 +622,8 @@ export default function AdminDashboard({ user, onSignOut }) {
   // saved for this admin; the other kinds are not shown here.
   const notifications = useNotifications({ limit: 20 });
   const certAlerts = notifications.items.filter((n) => n.kind === "certificate_submitted");
+  // "A farmer's loan request needs its collateral checked" alerts.
+  const loanAlerts = notifications.items.filter((n) => n.kind === "loan_submitted");
   const reloadNotifications = notifications.reload;
   useEffect(() => {
     // Check again every minute so a new submission shows up without a reload.
@@ -591,6 +636,12 @@ export default function AdminDashboard({ user, onSignOut }) {
     setStartOnCertificates(true);
     setCertNavKey((k) => k + 1);
     setActiveItem("User Management");
+  }
+
+  function handleOpenLoanAlert(n) {
+    notifications.markRead(n.id);
+    setStartOnCertificates(false);
+    setActiveItem("Loan Collateral");
   }
 
   const seenKey = "farmfund_admin_announcements_seen";
@@ -800,7 +851,9 @@ export default function AdminDashboard({ user, onSignOut }) {
           <AdminBell
             announcements={announcements}
             certAlerts={certAlerts}
+            loanAlerts={loanAlerts}
             onOpenCertAlert={handleOpenCertAlert}
+            onOpenLoanAlert={handleOpenLoanAlert}
             onOpened={reloadNotifications}
             onMarkAllRead={handleMarkAllAnnouncementsRead}
             onDismiss={handleDismissAnnouncement}
@@ -833,6 +886,8 @@ export default function AdminDashboard({ user, onSignOut }) {
           />
         ) : activeItem === "User Management" ? (
           <UserManagement key={certNavKey} onSignOut={onSignOut} startOnCertificates={startOnCertificates} />
+        ) : activeItem === "Loan Collateral" ? (
+          <LoanCollateralReview onSignOut={onSignOut} onReviewed={reloadNotifications} />
         ) : activeItem === "Farm Management" ? (
           <FarmManagement onSignOut={onSignOut} />
         ) : activeItem === "User Activity" ? (

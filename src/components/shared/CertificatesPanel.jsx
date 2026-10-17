@@ -99,7 +99,7 @@ export function CertificateMeta({ cert }) {
   return <p className="text-xs text-gray-400 mt-0.5 break-words">{bits.join(" · ")}</p>;
 }
 
-export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
+export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose, noun = "certificate", where = "on their profile", rejectHint = "e.g., The scan is blurry, please upload it again." }) {
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState("");
   const rejecting = mode === "rejected";
@@ -125,16 +125,16 @@ export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={close}>
       <div
         role="dialog"
-        aria-label={rejecting ? "Reject certificate" : "Verify certificate"}
+        aria-label={rejecting ? `Reject ${noun}` : `Verify ${noun}`}
         className="bg-white rounded-3xl p-7 max-w-md w-full shadow-2xl relative"
         onClick={(e) => e.stopPropagation()}
       >
         <button onClick={close} className="absolute top-5 right-5 text-gray-400 hover:text-gray-600" aria-label="Close">
           <X size={18} />
         </button>
-        <h3 className="text-lg font-bold text-gray-900">{rejecting ? "Reject this certificate?" : "Verify this certificate?"}</h3>
+        <h3 className="text-lg font-bold text-gray-900">{rejecting ? `Reject this ${noun}?` : `Verify this ${noun}?`}</h3>
         <p className="text-sm text-gray-500 mt-1">
-          “{cert.title}”. The farmer will see the result {rejecting ? "and your reason " : ""}on their profile.
+          “{cert.title}”. The farmer will see the result {rejecting ? "and your reason " : ""}{where}.
         </p>
         {cert.type === "barangay_certificate" && (
           <p className="text-xs mt-3 rounded-lg bg-[#f4f8f3] border border-[#d6e4cf] text-[#3f6238] px-3 py-2">
@@ -157,7 +157,7 @@ export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose }) {
             setNote(e.target.value);
             setProblem("");
           }}
-          placeholder={rejecting ? "e.g., The scan is blurry, please upload it again." : "e.g., Checked against the original."}
+          placeholder={rejecting ? rejectHint : "e.g., Checked against the original."}
           className="bg-[#f4f4f4] border border-gray-200 rounded-xl px-4 py-3 text-sm w-full resize-none focus:outline-none focus:ring-2 focus:ring-[#4d6b41] disabled:opacity-60"
         />
         <div className="flex justify-between">

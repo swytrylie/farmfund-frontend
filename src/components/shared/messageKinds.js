@@ -1,4 +1,4 @@
-import { Megaphone, Receipt, ShieldCheck } from "lucide-react";
+import { Megaphone, Receipt, ShieldCheck, Landmark } from "lucide-react";
 import { messageKind } from "../../lib/notifications";
 
 // How each kind of message in the bell and on the Alerts page looks. The bell,
@@ -37,6 +37,17 @@ export const KIND_UI = {
     iconWrap: "bg-emerald-100 text-emerald-700",
     tag: "bg-emerald-100 text-emerald-800",
     empty: "No certificate notices yet.",
+  },
+  loan_update: {
+    label: "Loan update",
+    openLabel: "Open loan update",
+    from: "FarmFund",
+    Icon: Landmark,
+    card: "bg-[#eff6ff] border-blue-100 hover:bg-[#e3eefd]",
+    dot: "bg-blue-500",
+    iconWrap: "bg-blue-100 text-blue-700",
+    tag: "bg-blue-100 text-blue-800",
+    empty: "No loan updates yet.",
   },
 };
 

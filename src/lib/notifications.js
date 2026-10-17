@@ -17,9 +17,12 @@ export const MESSAGE_FILTERS = {
   Announcements: "announcement",
   Reminders: "payment_reminder",
   Certificates: "certificate_verified",
+  "Loan updates": "loan_update",
 };
-export const messageKind = (a) =>
-  a.kind === "payment_reminder" || a.kind === "certificate_verified" ? a.kind : "announcement";
+// The kinds that are personal notifications (saved for this person), as
+// opposed to announcements from the FarmFund team.
+export const PERSONAL_KINDS = ["payment_reminder", "certificate_verified", "loan_update"];
+export const messageKind = (a) => (PERSONAL_KINDS.includes(a.kind) ? a.kind : "announcement");
 
 export const pesoText = (n) => `₱${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

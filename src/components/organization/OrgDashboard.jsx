@@ -213,6 +213,10 @@ export default function OrgDashboard({ user, onSignOut }) {
   const notifications = useNotifications({ limit: 20 });
   const proofAlerts = notifications.items.filter((n) => n.kind === "payment_proof_submitted");
   const unreadProofAlerts = proofAlerts.filter((n) => n.unread).length;
+  // "A verified loan request arrived" alerts (owner and finance managers). Opening
+  // one marks it read and goes to Loan Records, where the request can be decided.
+  const loanAlerts = notifications.items.filter((n) => n.kind === "loan_alert");
+  const unreadLoanAlerts = loanAlerts.filter((n) => n.unread).length;
   const reloadNotifications = notifications.reload;
   useEffect(() => {
     const timer = setInterval(() => {
@@ -223,6 +227,10 @@ export default function OrgDashboard({ user, onSignOut }) {
   function handleOpenProofAlert(n) {
     notifications.markRead(n.id);
     setActiveItem("Repayment Tracking");
+  }
+  function handleOpenLoanAlert(n) {
+    notifications.markRead(n.id);
+    setActiveItem("Loan Records");
   }
   function handleBellOpened() {
     announcements.reload();
@@ -335,6 +343,9 @@ export default function OrgDashboard({ user, onSignOut }) {
             proofAlerts={proofAlerts}
             unreadProofAlerts={unreadProofAlerts}
             onOpenProofAlert={handleOpenProofAlert}
+            loanAlerts={loanAlerts}
+            unreadLoanAlerts={unreadLoanAlerts}
+            onOpenLoanAlert={handleOpenLoanAlert}
             onOpen={handleBellOpened}
           />
         </div>

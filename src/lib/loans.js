@@ -9,6 +9,23 @@ export const getLoanOptions = () => authedRequest("/api/loans/options");
 export const requestLoan = (formData) => authedRequest("/api/loans", { method: "POST", body: formData });
 const getCollateralLink = (loanId) => authedRequest(`/api/loans/${loanId}/collateral/link`);
 
+// The admin's check of a new request's collateral, before the cooperative sees it.
+export function listLoanQueue({ status = "pending", search = "", page = 1, limit = 10 } = {}) {
+  const q = new URLSearchParams();
+  q.set("status", status);
+  if (search) q.set("search", search);
+  q.set("page", String(page));
+  q.set("limit", String(limit));
+  return authedRequest(`/api/loans/admin/queue?${q.toString()}`);
+}
+export const reviewLoanCollateral = (id, status, note) =>
+  authedRequest(`/api/loans/${id}/admin-review`, { method: "PATCH", body: { status, note } });
+
+// Requests still with the admin, or not verified by them, are not the
+// cooperative's to see; the farmer sees them with these names.
+export const isAwaitingAdmin = (loan) => loan && loan.status === "pending_admin";
+export const wasNotVerified = (loan) => loan && loan.status === "admin_rejected";
+
 export const DESCRIPTION_MIN = 5;
 export const DESCRIPTION_MAX = 500;
 export const cleanDescription = (raw) => String(raw || "").replace(/[<>]/g, "").slice(0, DESCRIPTION_MAX);
