@@ -1,12 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { authedRequest } from "../api";
 
-// Personal notifications for the signed-in person (right now: payment
-// reminders a cooperative sent them). The server only returns their own.
+// Personal notifications for the signed-in person (payment reminders a
+// cooperative sent them, and notes that an admin verified their certificate).
+// The server only returns their own.
 export const listMyNotifications = ({ page = 1, limit = 20 } = {}) =>
   authedRequest(`/api/notifications?page=${page}&limit=${limit}`);
 export const markNotificationRead = (id) => authedRequest(`/api/notifications/${id}/read`, { method: "POST" });
-export const markAllNotificationsRead = () => authedRequest("/api/notifications/read-all", { method: "POST" });
+export const markAllNotificationsRead = (kind) =>
+  authedRequest(`/api/notifications/read-all${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`, { method: "POST" });
+
+// The kinds of message a farmer sees in the bell and on the Alerts page,
+// besides the live alerts: each filter pill maps to one kind. Anything else is
+// treated as an announcement from the FarmFund team.
+export const MESSAGE_FILTERS = {
+  Announcements: "announcement",
+  Reminders: "payment_reminder",
+  Certificates: "certificate_verified",
+};
+export const messageKind = (a) =>
+  a.kind === "payment_reminder" || a.kind === "certificate_verified" ? a.kind : "announcement";
 
 export const pesoText = (n) => `₱${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -55,12 +68,18 @@ export function useNotifications({ limit = 20 } = {}) {
     [load]
   );
 
-  const markAllRead = useCallback(async () => {
+  // With a kind, only that kind is marked read (e.g. "Mark all as read" on the
+  // Reminders filter must not clear certificate notices).
+  const markAllRead = useCallback(async (kind) => {
     if (stateRef.current.unreadCount === 0) return;
     latest.current += 1;
-    setState((s) => ({ ...s, items: s.items.map((x) => ({ ...x, unread: false })), unreadCount: 0 }));
+    setState((s) => {
+      const items = s.items.map((x) => (!kind || x.kind === kind ? { ...x, unread: false } : x));
+      const cleared = s.items.filter((x) => x.unread && (!kind || x.kind === kind)).length;
+      return { ...s, items, unreadCount: kind ? Math.max(0, s.unreadCount - cleared) : 0 };
+    });
     try {
-      await markAllNotificationsRead();
+      await markAllNotificationsRead(kind);
     } catch {
       load();
     }

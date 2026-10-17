@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, Receipt, X } from "lucide-react";
+import { Bell, CreditCard, AlertTriangle, Calendar, Droplet, X } from "lucide-react";
 import { FILTERS } from "../../lib/alertEngine";
 import { formatAnnouncementDate } from "../../lib/announcements";
+import { MESSAGE_FILTERS, messageKind } from "../../lib/notifications";
+import { KIND_UI, uiFor } from "./messageKinds";
 
-// The alert categories, announcements from the FarmFund team, and payment
-// reminders from the person's cooperative.
-const CATEGORIES = [...FILTERS, "Announcements", "Reminders"];
-const isReminder = (a) => a.kind === "payment_reminder";
+// The alert categories, then one pill per kind of message: announcements from
+// the FarmFund team, payment reminders from the person's cooperative, and
+// certificate notices.
+const CATEGORIES = [...FILTERS, ...Object.keys(MESSAGE_FILTERS)];
 
 // Same icon/color mapping as the full Alerts page (by iconKey), just with
 // bell-specific card styling since this is a compact popup, not a full page.
@@ -59,18 +61,17 @@ export default function NotificationBell({
   // conditions): the dot shows while any alert exists or any announcement
   // hasn't been opened yet.
   const showDot = alerts.length > 0 || unreadAnnouncements > 0;
-  const messagesOnly = activeCategory === "Announcements" || activeCategory === "Reminders";
+  const messageFilterKind = MESSAGE_FILTERS[activeCategory]; // undefined for alert categories
+  const messagesOnly = Boolean(messageFilterKind);
   const visibleAlerts = messagesOnly
     ? []
     : alerts.filter((a) => activeCategory === "All" || a.categories.includes(activeCategory));
   const visibleAnnouncements =
     activeCategory === "All"
       ? announcements.slice(0, 3)
-      : activeCategory === "Announcements"
-        ? announcements.filter((a) => !isReminder(a)).slice(0, 10)
-        : activeCategory === "Reminders"
-          ? announcements.filter(isReminder).slice(0, 10)
-          : [];
+      : messageFilterKind
+        ? announcements.filter((a) => messageKind(a) === messageFilterKind).slice(0, 10)
+        : [];
 
   // Close on outside click
   useEffect(() => {
@@ -104,8 +105,7 @@ export default function NotificationBell({
   function handleClearAll() {
     if (!messagesOnly) onMarkAllAlertsRead?.();
     if (activeCategory === "All") onMarkAllAnnouncementsRead?.();
-    if (activeCategory === "Announcements") onMarkAllAnnouncementsRead?.("announcement");
-    if (activeCategory === "Reminders") onMarkAllAnnouncementsRead?.("payment_reminder");
+    if (messageFilterKind) onMarkAllAnnouncementsRead?.(messageFilterKind);
   }
 
   return (
@@ -160,21 +160,18 @@ export default function NotificationBell({
           <div className="px-4 pb-2 space-y-2 max-h-80 overflow-y-auto">
             {visibleAlerts.length === 0 && visibleAnnouncements.length === 0 && (
               <p className="text-sm text-gray-400 text-center py-6">
-                {activeCategory === "Announcements"
-                  ? "No announcements yet."
-                  : activeCategory === "Reminders"
-                    ? "No payment reminders yet."
-                    : "No notifications in this category."}
+                {messageFilterKind ? KIND_UI[messageFilterKind].empty : "No notifications in this category."}
               </p>
             )}
             {visibleAnnouncements.map((a) => {
-              const reminder = isReminder(a);
+              const ui = uiFor(a);
+              const KindIcon = ui.Icon;
               return (
                 <div
-                  key={`${reminder ? "rem" : "ann"}-${a.id}`}
+                  key={`${messageKind(a)}-${a.id}`}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${reminder ? "Open reminder" : "Open announcement"} ${a.title}`}
+                  aria-label={`${ui.openLabel} ${a.title}`}
                   onClick={() => handleOpenAnnouncement(a)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -182,35 +179,19 @@ export default function NotificationBell({
                       handleOpenAnnouncement(a);
                     }
                   }}
-                  className={`relative rounded-xl p-3 cursor-pointer border transition-colors ${
-                    reminder
-                      ? "bg-[#fff8ec] border-amber-100 hover:bg-[#fff1d9]"
-                      : "bg-[#f4f8f3] border-green-100 hover:bg-[#eef5ec]"
-                  }`}
+                  className={`relative rounded-xl p-3 cursor-pointer border transition-colors ${ui.card}`}
                 >
-                  {a.unread && (
-                    <span className={`absolute top-3 left-2 w-2 h-2 rounded-full ${reminder ? "bg-amber-500" : "bg-green-500"}`} />
-                  )}
+                  {a.unread && <span className={`absolute top-3 left-2 w-2 h-2 rounded-full ${ui.dot}`} />}
                   <div className="flex gap-3 pl-3">
-                    <span
-                      className={`shrink-0 p-2 rounded-lg h-fit ${
-                        reminder ? "bg-amber-100 text-amber-700" : "bg-[#e0ebda] text-[#2d4027]"
-                      }`}
-                    >
-                      {reminder ? <Receipt size={16} /> : <Megaphone size={16} />}
+                    <span className={`shrink-0 p-2 rounded-lg h-fit ${ui.iconWrap}`}>
+                      <KindIcon size={16} />
                     </span>
                     <div className="min-w-0">
                       <p className="font-bold text-gray-900 text-sm">{a.title}</p>
                       <p className="mt-0.5 text-xs text-gray-600 leading-relaxed line-clamp-2">{a.message}</p>
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-gray-400">{formatAnnouncementDate(a.at)}</span>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded ${
-                            reminder ? "bg-amber-100 text-amber-800" : "bg-[#dbe7d3] text-[#2d4027]"
-                          }`}
-                        >
-                          {reminder ? "Payment reminder" : "Announcement"}
-                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded ${ui.tag}`}>{ui.label}</span>
                       </div>
                     </div>
                   </div>

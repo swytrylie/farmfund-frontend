@@ -1,7 +1,8 @@
 import { useEffect } from "react";
-import { Megaphone, Receipt, X } from "lucide-react";
+import { X } from "lucide-react";
 import { formatAnnouncementDateTime, formatAnnouncementDate } from "../../lib/announcements";
-import { pesoText } from "../../lib/notifications";
+import { pesoText, messageKind } from "../../lib/notifications";
+import { uiFor } from "./messageKinds";
 
 function Row({ label, children }) {
   return (
@@ -12,9 +13,10 @@ function Row({ label, children }) {
   );
 }
 
-// The full text of one message, opened from the bell or the list: either an
-// announcement from the FarmFund team, or a payment reminder from the
-// person's cooperative (shown with the facts it carried when it was sent).
+// The full text of one message, opened from the bell or the list: an
+// announcement from the FarmFund team, a payment reminder from the person's
+// cooperative (shown with the facts it carried when it was sent), or a note
+// that an admin verified one of their certificates.
 export default function AnnouncementModal({ item, onClose }) {
   useEffect(() => {
     function onKey(e) {
@@ -24,7 +26,11 @@ export default function AnnouncementModal({ item, onClose }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const reminder = item.kind === "payment_reminder";
+  const kind = messageKind(item);
+  const reminder = kind === "payment_reminder";
+  const certificate = kind === "certificate_verified";
+  const ui = uiFor(item);
+  const KindIcon = ui.Icon;
   const d = item.details || {};
   const contact = [d.contactEmail, d.contactPhone].filter(Boolean).join(" · ");
 
@@ -32,7 +38,7 @@ export default function AnnouncementModal({ item, onClose }) {
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
         role="dialog"
-        aria-label={reminder ? "Payment reminder" : "Announcement"}
+        aria-label={ui.label}
         className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -41,13 +47,13 @@ export default function AnnouncementModal({ item, onClose }) {
         </button>
 
         <div className="flex items-center gap-3 pr-8">
-          <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${reminder ? "bg-amber-100" : "bg-[#e0ebda]"}`}>
-            {reminder ? <Receipt size={18} className="text-amber-700" /> : <Megaphone size={18} className="text-[#2d4027]" />}
+          <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${ui.iconWrap}`}>
+            <KindIcon size={18} />
           </span>
           <div className="min-w-0">
             <h3 className="text-xl font-bold text-gray-900 break-words">{item.title}</h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              From {reminder ? d.coopName || "your cooperative" : "FarmFund"} · {formatAnnouncementDateTime(item.at)}
+              From {reminder ? d.coopName || "your cooperative" : ui.from} · {formatAnnouncementDateTime(item.at)}
             </p>
           </div>
         </div>
@@ -64,6 +70,12 @@ export default function AnnouncementModal({ item, onClose }) {
               {d.dueDate ? `${formatAnnouncementDate(d.dueDate)}${d.dueNote ? ` (${d.dueNote})` : ""}` : "Not set"}
             </Row>
             {contact && <Row label="Questions?">{contact}</Row>}
+          </div>
+        )}
+        {certificate && (
+          <div className="mt-4 bg-[#effaf3] border border-emerald-100 rounded-xl px-4 py-2 text-sm">
+            {d.typeLabel && <Row label="Document">{d.typeLabel}</Row>}
+            {d.amount !== null && d.amount !== undefined && <Row label="Credit limit">{pesoText(d.amount)}</Row>}
           </div>
         )}
         {reminder && (

@@ -521,8 +521,9 @@ export default function Dashboard({ user, onSignOut }) {
     }
   }
 
-  // Messages for this person: announcements from the FarmFund team, and payment
-  // reminders their cooperative sent them. Both are shown together in the bell
+  // Messages for this person: announcements from the FarmFund team, payment
+  // reminders their cooperative sent them, and notes that an admin verified
+  // their certificate. All are shown together in the bell
   // and on the Alerts page (each item says what it is, via `kind`). Opening one
   // shows the full text and marks it read.
   const announcements = useAnnouncements({ limit: 20 });
@@ -538,14 +539,15 @@ export default function Dashboard({ user, onSignOut }) {
   const unreadInbox = announcements.unreadCount + reminders.unreadCount;
   const [openedAnnouncement, setOpenedAnnouncement] = useState(null);
   function handleOpenAnnouncement(a) {
-    if (a.kind === "payment_reminder") reminders.markRead(a.id);
+    if (a.kind === "payment_reminder" || a.kind === "certificate_verified") reminders.markRead(a.id);
     else announcements.markRead(a.id);
     setOpenedAnnouncement(a);
   }
-  // kind: "announcement" | "payment_reminder" | undefined (= both)
+  // kind: "announcement" | "payment_reminder" | "certificate_verified" | undefined (= all)
   function handleMarkAllInboxRead(kind) {
     if (!kind || kind === "announcement") announcements.markAllRead();
-    if (!kind || kind === "payment_reminder") reminders.markAllRead();
+    if (!kind) reminders.markAllRead();
+    else if (kind !== "announcement") reminders.markAllRead(kind);
   }
   function reloadInbox() {
     announcements.reload();

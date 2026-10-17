@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { CreditCard, AlertTriangle, Calendar, Droplet, Megaphone, Receipt, X } from "lucide-react";
+import { CreditCard, AlertTriangle, Calendar, Droplet, X } from "lucide-react";
 import { FILTERS } from "../../lib/alertEngine";
 import { formatAnnouncementDate } from "../../lib/announcements";
+import { MESSAGE_FILTERS, messageKind } from "../../lib/notifications";
+import { KIND_UI, uiFor } from "../shared/messageKinds";
 
-// The alert categories, announcements from the FarmFund team, and payment
-// reminders from the person's cooperative.
-const PAGE_FILTERS = [...FILTERS, "Announcements", "Reminders"];
-const isReminder = (a) => a.kind === "payment_reminder";
+// The alert categories, then one pill per kind of message: announcements from
+// the FarmFund team, payment reminders from the person's cooperative, and
+// certificate notices.
+const PAGE_FILTERS = [...FILTERS, ...Object.keys(MESSAGE_FILTERS)];
 
 const ICON_CONFIG = {
   loan: { Icon: CreditCard, bg: "bg-[#fce7f3]", color: "text-red-600" },
@@ -53,16 +55,17 @@ function AlertCard({ alert, onDismiss }) {
   );
 }
 
-// A message for this person: either from the FarmFund team (announcement) or a
-// payment reminder from their cooperative. Clicking it opens the full text (and
-// counts as reading it).
+// A message for this person: from the FarmFund team (announcement), a payment
+// reminder from their cooperative, or a note that a certificate was verified.
+// Clicking it opens the full text (and counts as reading it).
 function AnnouncementCard({ announcement, onOpen }) {
-  const reminder = isReminder(announcement);
+  const ui = uiFor(announcement);
+  const KindIcon = ui.Icon;
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${reminder ? "Open reminder" : "Open announcement"} ${announcement.title}`}
+      aria-label={`${ui.openLabel} ${announcement.title}`}
       onClick={() => onOpen(announcement)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -70,25 +73,14 @@ function AnnouncementCard({ announcement, onOpen }) {
           onOpen(announcement);
         }
       }}
-      className={`border rounded-2xl p-5 shadow-sm relative flex items-start gap-4 mb-4 cursor-pointer transition-colors ${
-        reminder
-          ? "bg-[#fff8ec] border-amber-100 hover:bg-[#fff1d9]"
-          : "bg-[#f4f8f3] border-green-100 hover:bg-[#eef5ec]"
-      }`}
+      className={`border rounded-2xl p-5 shadow-sm relative flex items-start gap-4 mb-4 cursor-pointer transition-colors ${ui.card}`}
     >
       {announcement.unread && (
-        <span
-          data-testid="unread-dot"
-          className={`absolute top-5 left-2 w-2 h-2 rounded-full ${reminder ? "bg-amber-500" : "bg-green-500"}`}
-        />
+        <span data-testid="unread-dot" className={`absolute top-5 left-2 w-2 h-2 rounded-full ${ui.dot}`} />
       )}
 
-      <span
-        className={`p-3 rounded-full flex items-center justify-center shrink-0 ${
-          reminder ? "bg-amber-100 text-amber-700" : "bg-[#e0ebda] text-[#2d4027]"
-        }`}
-      >
-        {reminder ? <Receipt size={18} /> : <Megaphone size={18} />}
+      <span className={`p-3 rounded-full flex items-center justify-center shrink-0 ${ui.iconWrap}`}>
+        <KindIcon size={18} />
       </span>
 
       <div className="min-w-0">
@@ -96,13 +88,7 @@ function AnnouncementCard({ announcement, onOpen }) {
         <p className="mt-1 text-sm text-gray-600 leading-relaxed line-clamp-2">{announcement.message}</p>
         <div className="mt-2 flex items-center gap-2">
           <span className="text-xs text-gray-400">{formatAnnouncementDate(announcement.at)}</span>
-          <span
-            className={`text-xs px-2.5 py-0.5 rounded-md font-medium ${
-              reminder ? "bg-amber-100 text-amber-800" : "bg-[#dbe7d3] text-[#2d4027]"
-            }`}
-          >
-            {reminder ? "Payment reminder" : "Announcement"}
-          </span>
+          <span className={`text-xs px-2.5 py-0.5 rounded-md font-medium ${ui.tag}`}>{ui.label}</span>
         </div>
       </div>
     </div>
@@ -123,15 +109,14 @@ export default function Alerts({
 }) {
   const [activeFilter, setActiveFilter] = useState("All");
 
-  const messagesOnly = activeFilter === "Announcements" || activeFilter === "Reminders";
+  const messageFilterKind = MESSAGE_FILTERS[activeFilter]; // undefined for alert categories
+  const messagesOnly = Boolean(messageFilterKind);
   const filteredAnnouncements =
     activeFilter === "All"
       ? announcements
-      : activeFilter === "Announcements"
-        ? announcements.filter((a) => !isReminder(a))
-        : activeFilter === "Reminders"
-          ? announcements.filter(isReminder)
-          : [];
+      : messageFilterKind
+        ? announcements.filter((a) => messageKind(a) === messageFilterKind)
+        : [];
   const filteredAlerts =
     messagesOnly
       ? []
@@ -144,8 +129,7 @@ export default function Alerts({
   function handleClearAll() {
     if (!messagesOnly) onMarkAllAlertsRead?.();
     if (activeFilter === "All") onMarkAllAnnouncementsRead?.();
-    if (activeFilter === "Announcements") onMarkAllAnnouncementsRead?.("announcement");
-    if (activeFilter === "Reminders") onMarkAllAnnouncementsRead?.("payment_reminder");
+    if (messageFilterKind) onMarkAllAnnouncementsRead?.(messageFilterKind);
   }
 
   const nothingAtAll = alerts.length === 0 && announcements.length === 0;
@@ -156,7 +140,7 @@ export default function Alerts({
         Alerts & Notifications
       </h2>
       <p className="mt-1 text-gray-500">
-        Payments, budgets, important farm events, payment reminders, and announcements from FarmFund
+        Payments, budgets, important farm events, payment reminders, certificate updates, and announcements from FarmFund
       </p>
 
       {/* Filter pills + Mark as all read */}
@@ -189,11 +173,9 @@ export default function Alerts({
       {filteredAlerts.length === 0 && filteredAnnouncements.length === 0 ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-10 shadow-sm text-center">
           <p className="text-gray-400 text-sm">
-            {activeFilter === "Announcements"
-              ? "No announcements yet."
-              : activeFilter === "Reminders"
-                ? "No payment reminders yet."
-                : nothingAtAll
+            {messageFilterKind
+              ? KIND_UI[messageFilterKind].empty
+              : nothingAtAll
                 ? "No alerts right now."
                 : `No ${activeFilter.toLowerCase()} alerts right now.`}
           </p>
