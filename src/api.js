@@ -104,3 +104,64 @@ export async function authedRequest(path, options = {}) {
     return apiRequest(path, { ...options, token: accessToken });
   }
 }
+
+// Like authedRequest, but for answers the server sends as a stream of plain
+// text (the AI Farm Advisor chat). onChunk(text) is called as each piece
+// arrives; the promise resolves with the whole answer.
+export async function streamAuthedText(path, { body, onChunk, signal } = {}) {
+  const send = () =>
+    fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal,
+    });
+
+  let res;
+  try {
+    res = await send();
+    if (res.status === 401) {
+      const fresh = await refreshSession().catch(() => {
+        accessToken = null;
+        onSessionExpired();
+        throw new Error('Your session expired. Please sign in again.');
+      });
+      accessToken = fresh.accessToken;
+      res = await send();
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    throw new Error(err.message?.startsWith('Your session') ? err.message : 'Cannot reach the server. Is the backend running?');
+  }
+
+  if (!res.ok || !res.body) {
+    const json = await res.json().catch(() => null);
+    if (res.status === 503 && json?.code === 'MAINTENANCE') {
+      try {
+        onMaintenance(json.maintenance?.until || null);
+      } catch {
+        // a broken handler must never hide the real error
+      }
+    }
+    const specific = Array.isArray(json?.details) && typeof json.details[0]?.message === 'string' ? json.details[0].message : null;
+    const error = new Error(specific || json?.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const piece = decoder.decode(value, { stream: true });
+    full += piece;
+    onChunk?.(piece);
+  }
+  return full;
+}

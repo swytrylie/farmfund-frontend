@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useAdvisorChat, plainText } from "../../lib/aiAdvisor";
 import {
   Lightbulb,
   Bot,
@@ -9,96 +10,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-const AI_WELCOME_MESSAGE = `Magandang araw, Manuel! I'm your AI Farm Advisor.
-
-Based on your records this month:
-• Total Income: ₱58,200
-• Total Expenses: ₱12,590
-• Net Surplus: ₱45,610
-
-Your farm is in a healthy position this month. You have two active loans totaling ₱151,500 remaining. Would you like budgeting tips for the upcoming wet season planting?`;
-
-const SUGGESTED_PROMPTS = [
-  "How can I reduce my farm expenses?",
-  "Analyze my finances",
-  "Advise me on my current loans",
-  "How is my farm's profit margin?",
-  "What's in my income trend?",
-];
-
 // Shown only after an AI answer has finished, so the person always has an
 // obvious next step without the initial pills cluttering the conversation.
 const FOLLOWUP_PROMPTS = [
   "What should I prioritize this month?",
   "Any risks I should watch for?",
 ];
-
-const FARM = {
-  income: 58200,
-  expenses: 12590,
-  surplus: 45610,
-  activeLoans: 151500,
-};
-
-const peso = (n) => `₱${n.toLocaleString()}`;
-
-// Scripted, keyword-matched replies built from the farm's real figures.
-// This is NOT a live AI call — swap getScriptedReply for a real API request
-// once the backend advisor exists.
-function getScriptedReply(question) {
-  const q = question.toLowerCase();
-  const expenseRatio = ((FARM.expenses / FARM.income) * 100).toFixed(1);
-  const margin = ((FARM.surplus / FARM.income) * 100).toFixed(1);
-
-  if (q.includes("expense") || q.includes("reduce")) {
-    return `Your expenses are ${peso(FARM.expenses)} against ${peso(
-      FARM.income
-    )} in income, about ${expenseRatio}% of what you earn. Start with your largest recurring costs (inputs and labor). Even small percentage cuts there add up to the biggest peso savings.`;
-  }
-  if (q.includes("loan")) {
-    return `You have ${peso(
-      FARM.activeLoans
-    )} remaining across two active loans. With a monthly surplus of ${peso(
-      FARM.surplus
-    )}, you could put part of it toward extra principal payments, if your lenders allow it without penalty. That can shorten your payoff time and cut interest.`;
-  }
-  if (q.includes("profit") || q.includes("margin")) {
-    return `Your profit margin this month is about ${margin}% (${peso(
-      FARM.surplus
-    )} surplus on ${peso(
-      FARM.income
-    )} income). That's strong. To push it higher, either raise income (better pricing, added revenue) or trim expenses.`;
-  }
-  if (q.includes("income") || q.includes("trend")) {
-    return `Income this month was ${peso(
-      FARM.income
-    )}, comfortably covering ${peso(
-      FARM.expenses
-    )} in expenses. I only have this month loaded, so I can't show a multi-month trend yet, but the current picture is healthy.`;
-  }
-  if (q.includes("analy") || q.includes("finance")) {
-    return `Snapshot: Income ${peso(FARM.income)}, Expenses ${peso(
-      FARM.expenses
-    )}, Surplus ${peso(FARM.surplus)}, Active Loans ${peso(
-      FARM.activeLoans
-    )}. Your surplus is healthy. Directing some of it at your loan balance is the most effective next step.`;
-  }
-  if (q.includes("prioritize")) {
-    return `This month I'd prioritize two things: set aside part of your ${peso(
-      FARM.surplus
-    )} surplus for wet-season planting inputs, and make sure your next loan payment is fully covered before spending elsewhere.`;
-  }
-  if (q.includes("risk")) {
-    return `The main thing to watch is your ${peso(
-      FARM.activeLoans
-    )} loan balance. Your surplus covers it comfortably today, but a bad harvest or price drop would shrink that cushion quickly. Keeping a reserve is the safest hedge.`;
-  }
-  return `Based on your numbers (Income ${peso(FARM.income)}, Expenses ${peso(
-    FARM.expenses
-  )}, Surplus ${peso(FARM.surplus)}, Active Loans ${peso(
-    FARM.activeLoans
-  )}), things look healthy. Ask me about expenses, loans, or profit margin and I'll go deeper.`;
-}
 
 const COMPACT_STYLE = { width: 380, height: 520, bottom: 96, right: 24 };
 const EXPANDED_STYLE = {
@@ -111,15 +28,14 @@ const EXPANDED_STYLE = {
 export default function AIAdvisorWidget() {
   const [isAiAdvisorOpen, setIsAiAdvisorOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [messages, setMessages] = useState([
-    { id: "welcome", sender: "ai", text: AI_WELCOME_MESSAGE },
-  ]);
+  // The advisor's data and conversation load the first time the panel opens.
+  const { advisor, messages, loading, loadError, reload, isThinking, isStreaming, busy, send, hasStarted } = useAdvisorChat({
+    enabled: isAiAdvisorOpen,
+  });
   const [inputValue, setInputValue] = useState("");
-  const [isThinking, setIsThinking] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [showFollowups, setShowFollowups] = useState(false);
   const bottomRef = useRef(null);
-  const replyTimer = useRef(null);
 
   // Scrolls to the latest message whenever the conversation changes, and
   // also when the panel opens or resizes.
@@ -127,7 +43,7 @@ export default function AIAdvisorWidget() {
     if (isAiAdvisorOpen) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messages, isThinking, isAiAdvisorOpen, isExpanded]);
+  }, [messages, isThinking, isStreaming, isAiAdvisorOpen, isExpanded]);
 
   // Lets other parts of the app (like the sidebar's AI Advisor item) open
   // this widget by dispatching: window.dispatchEvent(new Event("farmfund:open-ai-advisor"))
@@ -139,31 +55,17 @@ export default function AIAdvisorWidget() {
     return () => window.removeEventListener("farmfund:open-ai-advisor", handleOpenRequest);
   }, []);
 
-  useEffect(() => () => clearTimeout(replyTimer.current), []);
-
-  function sendMessage(text) {
+  async function sendMessage(text) {
     const trimmed = text.trim();
-    if (!trimmed || isThinking) return;
+    if (!trimmed || busy) return;
 
     // Any question, from a pill or the text box, immediately clears the
     // suggestion rows so the panel moves into active conversation mode.
     setShowSuggestions(false);
     setShowFollowups(false);
-    setMessages((prev) => [
-      ...prev,
-      { id: `u-${Date.now()}`, sender: "user", text: trimmed },
-    ]);
     setInputValue("");
-    setIsThinking(true);
-
-    replyTimer.current = setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        { id: `ai-${Date.now()}`, sender: "ai", text: getScriptedReply(trimmed) },
-      ]);
-      setIsThinking(false);
-      setShowFollowups(true); // follow-ups appear only once the answer is done
-    }, 1200);
+    await send(trimmed);
+    setShowFollowups(true); // follow-ups appear only once the answer is done
   }
 
   function handleSend(e) {
@@ -235,7 +137,19 @@ export default function AIAdvisorWidget() {
           </div>
 
           {/* Message body */}
-          <div className="bg-[#f7f8f6] p-4 flex-1 min-h-0 overflow-y-auto space-y-4">
+          <div className="bg-[#f7f8f6] p-4 flex-1 min-h-0 overflow-y-auto space-y-4" aria-live="polite">
+            {loading && <p className="text-xs text-gray-400 text-center py-6">Loading advisor…</p>}
+            {loadError && !loading && (
+              <div className="text-center py-6 space-y-2">
+                <p className="text-xs text-gray-600">Couldn't load the advisor. {loadError.message}</p>
+                <button
+                  onClick={reload}
+                  className="text-xs font-semibold text-[#2d4027] underline cursor-pointer"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
             {messages.map((m) =>
               m.sender === "ai" ? (
                 <div key={m.id} className="flex gap-2">
@@ -243,11 +157,13 @@ export default function AIAdvisorWidget() {
                     <Bot size={14} className="text-white" />
                   </span>
                   <div
-                    className={`bg-white border border-gray-200 rounded-2xl p-4 ${textSize} text-gray-800 shadow-sm whitespace-pre-line leading-relaxed ${
+                    className={`bg-white border rounded-2xl p-4 ${textSize} shadow-sm whitespace-pre-line leading-relaxed ${
+                    m.isError ? "border-red-200 text-red-700" : "border-gray-200 text-gray-800"
+                  } ${
                       isExpanded ? "max-w-[75%]" : ""
                     }`}
                   >
-                    {m.text}
+                    {plainText(m.text)}
                   </div>
                 </div>
               ) : (
@@ -281,9 +197,10 @@ export default function AIAdvisorWidget() {
           </div>
 
           {/* Initial suggestion pills — gone as soon as a question is sent */}
-          {showSuggestions && (
+          {/* A conversation saved from before starts without the opening suggestions. */}
+          {showSuggestions && !hasStarted && advisor && (
             <div className="flex flex-wrap gap-2 p-3 bg-[#f7f8f6] shrink-0">
-              {SUGGESTED_PROMPTS.map((prompt) => (
+              {advisor.suggestedPrompts.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => sendMessage(prompt)}
@@ -296,7 +213,7 @@ export default function AIAdvisorWidget() {
           )}
 
           {/* Follow-ups — only after an answer finishes */}
-          {showFollowups && !isThinking && (
+          {showFollowups && !busy && (
             <div className="p-3 bg-[#f7f8f6] shrink-0">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
@@ -334,12 +251,13 @@ export default function AIAdvisorWidget() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Ask about your farm finances..."
-              disabled={isThinking}
+              maxLength={1000}
+              disabled={busy || !advisor}
               className="bg-white border border-gray-200 rounded-full px-5 py-3 text-sm text-gray-700 placeholder-gray-400 flex-1 focus:outline-none focus:ring-2 focus:ring-[#4d6b41] disabled:opacity-70"
             />
             <button
               type="submit"
-              disabled={isThinking || !inputValue.trim()}
+              disabled={busy || !advisor || !inputValue.trim()}
               className="text-[#2d4027] hover:scale-105 transition-transform cursor-pointer p-1 disabled:opacity-40 disabled:hover:scale-100"
               aria-label="Send"
             >
