@@ -39,6 +39,21 @@ export function sanitizeAmount(raw) {
   return decPart === undefined ? trimmedInt : `${trimmedInt}.${decPart.slice(0, 2)}`;
 }
 
+// Like sanitizeAmount, but for plain measurements (kg, hectares) where more
+// than 2 decimal places can be meaningful (0.125 ha). Digits and one decimal
+// point only, at most `places` decimals.
+export function sanitizeDecimal(raw, places = 2) {
+  let cleaned = String(raw).replace(/[^\d.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  if (firstDot !== -1) {
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+  }
+  if (cleaned.startsWith(".")) cleaned = "0" + cleaned;
+  const [intPart, decPart] = cleaned.split(".");
+  const trimmedInt = intPart.replace(/^0+(?=\d)/, "");
+  return decPart === undefined ? trimmedInt : `${trimmedInt}.${decPart.slice(0, places)}`;
+}
+
 // The typed amount shown with thousands separators ("1234.5" -> "1,234.5").
 export function displayAmount(raw) {
   if (raw === "") return "";

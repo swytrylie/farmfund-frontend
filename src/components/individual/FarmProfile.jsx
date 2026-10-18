@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { User, Home, Lock, Camera, Eye, EyeOff, CheckCircle2, Award } from "lucide-react";
 import { authedRequest } from "../../api";
+import { sanitizeDecimal } from "../../lib/repaymentData";
+import { PROVINCE, PLACES, addressFor, placeFromAddress } from "../../lib/pangasinan";
 import {
   ACCEPT,
   listMine,
@@ -67,6 +69,37 @@ function TextField({ label, value, onChange, error, placeholder, type = "text" }
       />
       {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
     </div>
+  );
+}
+
+// Province is fixed; the city or municipality is picked from the list. A
+// location typed freely before the list existed is kept as the first option
+// ("... (current)") so nothing is lost until the farmer picks a place.
+function LocationFields({ place, legacy, onPlaceChange }) {
+  const fieldClass =
+    "bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30";
+  return (
+    <>
+      <div>
+        <FieldLabel>Province</FieldLabel>
+        <input type="text" value={PROVINCE} readOnly aria-label="Province" className={`${fieldClass} bg-gray-50 text-gray-500 cursor-not-allowed`} />
+      </div>
+      <div>
+        <FieldLabel>City / Municipality</FieldLabel>
+        <select
+          aria-label="City or municipality"
+          value={place || (legacy ? "__legacy" : "")}
+          onChange={(e) => onPlaceChange(e.target.value)}
+          className={fieldClass}
+        >
+          <option value="">Select city or municipality</option>
+          {legacy && <option value="__legacy">{legacy} (current)</option>}
+          {PLACES.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+      </div>
+    </>
   );
 }
 
@@ -220,9 +253,11 @@ function PersonalInfoTab({ user, onUserUpdated, showToast, onGoToSecurity }) {
 function FarmDetailsTab({ farm, onFarmUpdated, showToast }) {
   const [draft, setDraft] = useState({
     name: farm?.name || "",
-    address: farm?.location?.address || "",
+    place: placeFromAddress(farm?.location?.address),
     totalAreaHectares: farm?.totalAreaHectares ? String(farm.totalAreaHectares) : "",
   });
+  // An older, freely typed location that is not on the list.
+  const legacyAddress = placeFromAddress(farm?.location?.address) ? "" : (farm?.location?.address || "").trim();
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -236,7 +271,8 @@ function FarmDetailsTab({ farm, onFarmUpdated, showToast }) {
     try {
       const body = {
         name: draft.name.trim(),
-        location: { address: draft.address.trim() },
+        // The picked place; if none is picked the old typed location is kept.
+        location: { address: draft.place ? addressFor(draft.place) : legacyAddress },
         totalAreaHectares: draft.totalAreaHectares ? Number(draft.totalAreaHectares) : undefined,
       };
       const updated = await authedRequest(`/api/farms/${farm._id}`, { method: "PATCH", body });
@@ -252,7 +288,7 @@ function FarmDetailsTab({ farm, onFarmUpdated, showToast }) {
   function handleCancel() {
     setDraft({
       name: farm?.name || "",
-      address: farm?.location?.address || "",
+      place: placeFromAddress(farm?.location?.address),
       totalAreaHectares: farm?.totalAreaHectares ? String(farm.totalAreaHectares) : "",
     });
     setError("");
@@ -263,11 +299,15 @@ function FarmDetailsTab({ farm, onFarmUpdated, showToast }) {
       <h3 className="font-bold text-gray-900 mb-4">Farm Details</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <TextField label="Farm Name" value={draft.name} onChange={(v) => setDraft((p) => ({ ...p, name: v }))} placeholder="e.g., Dizon Family Farm" />
-        <TextField label="Location" value={draft.address} onChange={(v) => setDraft((p) => ({ ...p, address: v }))} placeholder="City, Province" />
+        <LocationFields
+          place={draft.place}
+          legacy={legacyAddress}
+          onPlaceChange={(v) => setDraft((p) => ({ ...p, place: v === "__legacy" ? "" : v }))}
+        />
         <TextField
           label="Total Farm Size (Hectares)"
           value={draft.totalAreaHectares}
-          onChange={(v) => setDraft((p) => ({ ...p, totalAreaHectares: v.replace(/[^\d.]/g, "") }))}
+          onChange={(v) => setDraft((p) => ({ ...p, totalAreaHectares: sanitizeDecimal(v, 4) }))}
           placeholder="2.5"
         />
       </div>

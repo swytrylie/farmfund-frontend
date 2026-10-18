@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, Sprout } from "lucide-react";
 import { authedRequest } from "../../api";
+import { sanitizeDecimal } from "../../lib/repaymentData";
 
 const STATUS_CONFIG = {
   planned: { label: "Planned", className: "bg-gray-100 text-gray-600" },
@@ -147,9 +148,9 @@ function FarmingCycleCard({ cycle, onUpdate }) {
             <label className="text-[11px] font-semibold text-gray-500 block mb-1">Actual Yield (kg)</label>
             <input
               type="text"
-              inputMode="numeric"
+              inputMode="decimal"
               value={actualYield}
-              onChange={(e) => setActualYield(e.target.value.replace(/[^\d]/g, ""))}
+              onChange={(e) => setActualYield(sanitizeDecimal(e.target.value))}
               placeholder="0"
               className={selectClass}
             />
@@ -264,9 +265,9 @@ function NewCycleModal({ crops, onSave, onCancel }) {
             <label className="text-sm font-medium text-gray-700 block mb-1.5">Expected Yield (kg, optional)</label>
             <input
               type="text"
-              inputMode="numeric"
+              inputMode="decimal"
               value={expectedYield}
-              onChange={(e) => setExpectedYield(e.target.value.replace(/[^\d]/g, ""))}
+              onChange={(e) => setExpectedYield(sanitizeDecimal(e.target.value))}
               placeholder="0"
               className={selectClass}
             />

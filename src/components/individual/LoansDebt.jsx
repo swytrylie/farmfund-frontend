@@ -405,8 +405,10 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const fileInput = useRef(null);
-  const cap = credit ? Math.min(credit.available, 500000) : 500000;
-  const overLimit = Number(principalAmount) > cap;
+  // The most a farmer can borrow is whatever credit they still have. (If the
+  // credit figures did not load, the server still checks every request.)
+  const cap = credit ? credit.available : null;
+  const overLimit = cap !== null && Math.round((Number(principalAmount) || 0) * 100) > Math.round(cap * 100);
 
   function loadOptions() {
     setOptionsError("");
@@ -437,7 +439,7 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
   const interest = showSummary ? interestAmount(principal, collateralOption.ratePercent) : 0;
 
   const canSubmit =
-    !saving && !preparing && !!options && !!cooperative && principal > 0 && !overLimit && !!cropOption && !!collateralOption && descriptionOk && !!file && !fileMsg;
+    !saving && !preparing && !!options && !!cooperative && principal >= 1 && !overLimit && !!cropOption && !!collateralOption && descriptionOk && !!file && !fileMsg;
 
   async function handlePick(e) {
     const picked = e.target.files && e.target.files[0];
@@ -456,11 +458,11 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
       setError("Select a cooperative.");
       return;
     }
-    if (!principal || principal <= 0 || principal > 500000) {
-      setError("Enter a principal amount between ₱1 and ₱500,000.");
+    if (!principal || principal < 1) {
+      setError("Enter a principal amount of at least ₱1.");
       return;
     }
-    if (credit && principal > credit.available) {
+    if (credit && overLimit) {
       setError(
         credit.available > 0
           ? `That is more than your available credit. You can borrow up to ${peso(credit.available)}.`
@@ -549,19 +551,16 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
             <input
               id="rl-amount"
               type="text"
-              inputMode="numeric"
-              value={principalAmount ? Number(principalAmount).toLocaleString("en-US") : ""}
+              inputMode="decimal"
+              value={displayAmount(principalAmount)}
               onChange={(e) => {
-                // Strips anything that isn't a digit as it's typed — this
-                // genuinely prevents letters/symbols from ever entering the
-                // field, rather than just validating after the fact. Also
-                // avoids the type="number" quirk where browsers still
-                // accept "e" notation (e.g. typing "1e9" silently becomes
-                // 1,000,000,000, bypassing any max attribute).
-                const digitsOnly = e.target.value.replace(/[^\d]/g, "");
-                setPrincipalAmount(digitsOnly);
+                // Keeps only digits and one decimal point (max 2 decimals)
+                // as it's typed — letters/symbols can never enter the
+                // field, and the type="number" quirk where browsers accept
+                // "e" notation (1e9) is avoided.
+                setPrincipalAmount(sanitizeAmount(e.target.value.replace(/,/g, "")));
               }}
-              placeholder="50,000"
+              placeholder="0.00"
               className={`${selectClass} pl-8 ${overLimit ? "ring-2 ring-red-400 border-red-300" : ""}`}
             />
           </div>
@@ -570,9 +569,19 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
               overLimit ? "text-red-500 font-semibold" : "text-gray-400"
             }`}
           >
-            {principalAmount ? peso(Number(principalAmount)) : "₱0.00"} / {peso(credit ? credit.available : 500000)} {credit ? "available" : "max"}
-            {overLimit && " — over the limit"}
+            {principalAmount ? peso(Number(principalAmount)) : "₱0.00"}
+            {credit ? ` / ${peso(credit.available)} available` : ""}
+            {overLimit && " — over your available credit"}
           </p>
+          {credit && credit.available > 0 && (
+            <button
+              type="button"
+              onClick={() => setPrincipalAmount(String(credit.available))}
+              className="mt-1 text-[11px] font-medium text-[#4f7331] hover:underline"
+            >
+              Borrow my full available credit
+            </button>
+          )}
         </div>
 
         <div>

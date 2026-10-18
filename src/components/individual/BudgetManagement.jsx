@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
 import { Plus, Pencil, AlertTriangle, Calendar } from "lucide-react";
 import { authedRequest } from "../../api";
+import { sanitizeAmount, displayAmount } from "../../lib/repaymentData";
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
-// Formats a raw digit string with thousand separators as you type — e.g.
-// "50000" displays as "50,000". The digit-only value (no commas) is what's
+// Formats the typed amount with thousand separators as you type — e.g.
+// "50000.5" displays as "50,000.5". The plain value (no commas) is what's
 // actually stored in state and sent to the backend; this only affects
-// what's shown inside the input box itself.
-function formatLiveAmount(digitsOnly) {
-  if (!digitsOnly) return "";
-  return Number(digitsOnly).toLocaleString("en-US");
+// what's shown inside the input box itself. Centavos (2 decimals) are fine.
+function formatLiveAmount(raw) {
+  return displayAmount(raw || "");
 }
 
 function AdjustAllocationPanel({ currentAmount, onSave, onCancel }) {
@@ -43,9 +43,9 @@ function AdjustAllocationPanel({ currentAmount, onSave, onCancel }) {
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-medium pointer-events-none">₱</span>
           <input
             type="text"
-            inputMode="numeric"
+            inputMode="decimal"
             value={formatLiveAmount(digits)}
-            onChange={(e) => setDigits(e.target.value.replace(/[^\d]/g, ""))}
+            onChange={(e) => setDigits(sanitizeAmount(e.target.value.replace(/,/g, "")))}
             className={`bg-white border rounded-full pl-7 pr-4 py-1.5 text-xs text-gray-800 w-full focus:outline-none focus:ring-2 focus:ring-[#4d6b41]/30 ${
               overLimit ? "border-red-300 ring-2 ring-red-400" : "border-gray-300"
             }`}
@@ -196,9 +196,9 @@ function NewAllocationModal({ availableCategories, allCategories, onSave, onCanc
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium pointer-events-none">₱</span>
               <input
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={formatLiveAmount(amount)}
-                onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))}
+                onChange={(e) => setAmount(sanitizeAmount(e.target.value.replace(/,/g, "")))}
                 placeholder="0"
                 className={`${selectClass} pl-8 ${
                   Number(amount) > 500000 ? "ring-2 ring-red-400 border-red-300" : ""
@@ -304,9 +304,9 @@ function NewBudgetPrompt({ onCreated, farmId }) {
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium pointer-events-none">₱</span>
             <input
               type="text"
-              inputMode="numeric"
+              inputMode="decimal"
               value={formatLiveAmount(totalAmount)}
-              onChange={(e) => setTotalAmount(e.target.value.replace(/[^\d]/g, ""))}
+              onChange={(e) => setTotalAmount(sanitizeAmount(e.target.value.replace(/,/g, "")))}
               placeholder="0"
               className={`${selectClass} pl-8 ${
                 Number(totalAmount) > 500000 ? "ring-2 ring-red-400 border-red-300" : ""
