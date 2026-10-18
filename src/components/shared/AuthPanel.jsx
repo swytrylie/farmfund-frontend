@@ -41,9 +41,9 @@ export default function AuthPanel({
   const isSignup = mode === "signup";
   const isSuccess = mode === "account-success" || mode === "submitted-organization";
   const cardSizeClasses = isSignup
-    ? "w-[520px] min-h-[620px] p-6"
+    ? "w-[520px] min-h-[min(620px,90vh)] p-6"
     : isSuccess
-    ? "w-[520px] min-h-[580px] p-10"
+    ? "w-[520px] min-h-[min(580px,90vh)] p-10"
     : "w-[600px] h-[650px] p-10";
 
   return (
@@ -62,9 +62,12 @@ export default function AuthPanel({
           visible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-8"
         }`}
       >
-        {/* Glassmorphism card — footprint varies slightly for the signup form, see above */}
+        {/* Glassmorphism card — footprint varies slightly for the signup form, see above.
+            The empty before/after spacers centre a short form, but (unlike
+            justify-center) let a tall one start at the top and scroll, so
+            its first fields are never cut off. */}
         <div
-          className={`relative max-w-[90vw] max-h-[90vh] flex flex-col justify-center backdrop-blur-md bg-white/10 border border-white/20 rounded-2xl shadow-2xl overflow-y-auto ${cardSizeClasses}`}
+          className={`relative max-w-[90vw] max-h-[90vh] flex flex-col before:content-[''] before:flex-1 after:content-[''] after:flex-1 backdrop-blur-md bg-white/10 border border-white/20 rounded-2xl shadow-2xl overflow-y-auto ${cardSizeClasses}`}
         >
           <button
             onClick={handleClose}
