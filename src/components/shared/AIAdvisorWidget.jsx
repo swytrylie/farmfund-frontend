@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useAdvisorChat, plainText } from "../../lib/aiAdvisor";
+import AIGuideButton from "./AIGuide";
 import {
   Lightbulb,
   Bot,
@@ -119,6 +120,7 @@ export default function AIAdvisorWidget() {
               <span className="font-bold text-sm">AI Farm Advisor</span>
             </div>
             <div className="flex items-center gap-3">
+              <AIGuideButton tab="chat" tone="dark" />
               <button
                 onClick={() => setIsExpanded((v) => !v)}
                 className="text-white/70 hover:text-white transition-colors"

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Sparkles, Send, Sprout, ChevronDown, CloudRain, RotateCcw } from "lucide-react";
 import { useAdvisorChat, plainText, peso } from "../../lib/aiAdvisor";
+import AIGuideButton from "../shared/AIGuide";
 
 const shortDate = (iso) =>
   new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
@@ -124,10 +125,13 @@ export default function AIAdvisor() {
   const header = (
     <div className="flex-shrink-0 mb-4 pr-16">
       <h2 className="text-3xl font-bold text-gray-900">AI Farm Advisor</h2>
-      <p className="mt-1 text-gray-500">
-        Tailored recommendations generated from your farm records and AI
-        summary.
-      </p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="text-gray-500">
+          Tailored recommendations generated from your farm records and AI
+          summary.
+        </p>
+        <AIGuideButton tab="start" autoOpen />
+      </div>
     </div>
   );
 

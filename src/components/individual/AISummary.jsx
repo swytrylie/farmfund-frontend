@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { DollarSign, Wheat, CreditCard, RefreshCw, Info } from "lucide-react";
 import { fetchSummary } from "../../lib/aiAdvisor";
+import AIGuideButton from "../shared/AIGuide";
 
 // Spec calls for the same "Credit card icon" on both the Loans/Debt and
 // Budget Management driver cards, even though a budget-specific icon might
@@ -163,17 +164,20 @@ export default function AISummary({ user }) {
         <p className="text-gray-500">
           Plain-language overview of your farm's financial health
         </p>
-        {data.generatedAt && (
-          <button
-            type="button"
-            onClick={() => load(true)}
-            disabled={refreshing}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#3f6238] hover:text-[#2d4027] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
-            {refreshing ? "Updating…" : "Update summary"}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <AIGuideButton tab="summary" label="How to read this" />
+          {data.generatedAt && (
+            <button
+              type="button"
+              onClick={() => load(true)}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#3f6238] hover:text-[#2d4027] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Updating…" : "Update summary"}
+            </button>
+          )}
+        </div>
       </div>
 
       {data.source === "rules" && (
