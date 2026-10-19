@@ -82,7 +82,11 @@ export default function AnnouncementModal({ item, onClose }) {
         {loanUpdate && (
           <div className="mt-4 bg-[#eff6ff] border border-blue-100 rounded-xl px-4 py-2 text-sm">
             {d.typeLabel && <Row label="Update">{d.typeLabel}</Row>}
-            {d.amount !== null && d.amount !== undefined && <Row label="Loan amount">{pesoText(d.amount)}</Row>}
+            {d.receiptNo && <Row label="Receipt no.">{d.receiptNo}</Row>}
+            {d.loanRef && d.receiptNo && <Row label="Loan">{d.loanRef}</Row>}
+            {d.amount !== null && d.amount !== undefined && <Row label={d.receiptNo ? "Amount paid" : d.typeLabel === "Credit limit" ? "New credit limit" : "Loan amount"}>{pesoText(d.amount)}</Row>}
+            {d.methodLabel && d.receiptNo && <Row label="Payment method">{d.methodLabel}</Row>}
+            {d.receiptNo && d.remaining !== null && d.remaining !== undefined && <Row label="Remaining balance">{pesoText(d.remaining)}</Row>}
             {d.coopName && <Row label="Cooperative">{d.coopName}</Row>}
             {d.dueDate && <Row label="Due date">{`${formatAnnouncementDate(d.dueDate)}${d.dueNote ? ` (${d.dueNote})` : ""}`}</Row>}
             {d.reason && <Row label="Reason">{d.reason}</Row>}
