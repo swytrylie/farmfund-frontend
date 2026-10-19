@@ -152,6 +152,16 @@ function buildKpiCards(k) {
       tag: k.totalUsers > 0 ? `${pctActive}% of total users` : "No users yet",
       tagColor: k.activeToday > 0 ? green : grey,
     },
+    // Loans running across the whole system (grace period counts as active).
+    // If the server has not been updated yet, show a dash instead of a false 0.
+    activeLoans:
+      typeof k.activeLoans === "number"
+        ? {
+            value: formatCount(k.activeLoans),
+            tag: k.graceLoans > 0 ? `${formatCount(k.graceLoans)} in grace period` : "None in grace period",
+            tagColor: k.graceLoans > 0 ? "text-[#4a7fc9]" : grey,
+          }
+        : { value: "—", tag: "Not available yet", tagColor: grey },
     suspendedAccounts: {
       value: formatCount(k.suspendedAccounts),
       tag: k.suspendedAccounts > 0 ? "Needs review" : "None right now",
@@ -600,10 +610,11 @@ function AdminDashboardHome({ data, busyId, onApprove, onDecline, onNavigate }) 
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         <KPICard label="Total Users" {...cards.totalUsers} borderColor="border-l-[#4d6b41]" />
         <KPICard label="Cooperatives" {...cards.cooperatives} borderColor="border-l-[#d9a736]" />
         <KPICard label="Active Today" {...cards.activeToday} borderColor="border-l-[#4a7fc9]" />
+        <KPICard label="Active Loans" {...cards.activeLoans} borderColor="border-l-[#7a4fb5]" />
         <KPICard
           label="Suspended Accounts"
           {...cards.suspendedAccounts}

@@ -55,7 +55,10 @@ function App() {
 
   // If a refresh ever fails mid-session, drop back to the login screen.
   useEffect(() => {
-    setSessionExpiredHandler(() => setSession(null));
+    setSessionExpiredHandler(() => {
+      setSession(null);
+      setAdminSession(null);
+    });
   }, []);
 
   // Any request the server refuses because of maintenance lands here, and
@@ -79,9 +82,9 @@ function App() {
   }, []);
 
   // On page load, try to restore the session from the refresh cookie.
-  // Skipped entirely on the admin path, since admin doesn't use this real
-  // backend session flow at all — and skipped on the accept-invite path
-  // too, since nobody there has an account to restore a session for yet.
+  // Skipped on the admin path (the effect below restores the admin session
+  // there) and on the accept-invite path, since nobody there has an account
+  // to restore a session for yet.
   useEffect(() => {
     if (isAdminPath || isAcceptInvitePath || isSecureAccountPath) return;
     let cancelled = false;
@@ -91,7 +94,10 @@ function App() {
         const { accessToken } = await refreshSession();
         setAccessToken(accessToken);
         const user = await apiRequest("/api/auth/me", { token: accessToken });
-        if (!cancelled) setSession({ accessToken, user });
+        // An admin account has no farmer or cooperative dashboard: it signs
+        // in on /admin only, so here it just sees the normal login page.
+        if (!cancelled && user.role !== "admin") setSession({ accessToken, user });
+        else setAccessToken(null);
       } catch {
         // No valid cookie: just show the landing/login page.
       } finally {
@@ -100,6 +106,33 @@ function App() {
     }
 
     restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Same idea on /admin: an admin who is already signed in stays signed in
+  // when the page is reloaded. Only an account that really is an admin is
+  // restored; if the cookie belongs to anyone else, the admin login shows.
+  useEffect(() => {
+    if (!isAdminPath) return;
+    let cancelled = false;
+
+    async function restoreAdminSession() {
+      try {
+        const { accessToken } = await refreshSession();
+        setAccessToken(accessToken);
+        const user = await apiRequest("/api/auth/me", { token: accessToken });
+        if (!cancelled && user.role === "admin") setAdminSession({ accessToken, user });
+        else setAccessToken(null);
+      } catch {
+        // No valid cookie: show the admin login.
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    }
+
+    restoreAdminSession();
     return () => {
       cancelled = true;
     };
@@ -163,6 +196,13 @@ function App() {
           user={adminSession.user}
           onSignOut={handleAdminSignOut}
         />
+      );
+    }
+    if (checking) {
+      return (
+        <div className="min-h-screen flex items-center justify-center text-gray-500">
+          Loading…
+        </div>
       );
     }
     return (
