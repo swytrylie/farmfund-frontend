@@ -353,6 +353,7 @@ export default function OrgDashboard({ user, onSignOut }) {
         {ActiveSectionComponent ? (
           <ActiveSectionComponent
             user={profile}
+            orgInfo={orgInfo}
             onProfileUpdated={handleProfileUpdated}
             onNavigate={setActiveItem}
             reminders={reminders}

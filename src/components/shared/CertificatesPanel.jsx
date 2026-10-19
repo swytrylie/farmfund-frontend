@@ -53,7 +53,15 @@ export function CreditLine({ credit, who = "The farmer" }) {
         <span className="font-semibold">Credit limit {moneyText(credit.limit)}</span>
         {credit.limit > 0 ? ` · used ${moneyText(credit.used)} · available ${moneyText(credit.available)}` : ""}
       </p>
-      {why && <p className="mt-0.5 text-gray-500">{why} Verifying a Barangay Certificate sets the limit to {moneyText(CREDIT_LIMIT_AMOUNT)}.</p>}
+      {why && (
+        <p className="mt-0.5 text-gray-500">
+          {why}{" "}
+          {credit.custom
+            ? "The limit set by the cooperative stays ₱0 until it is verified."
+            : `Verifying a Barangay Certificate sets the limit to ${moneyText(CREDIT_LIMIT_AMOUNT)}.`}
+        </p>
+      )}
+      {credit.custom && !why && <p className="mt-0.5 text-gray-500">Set by the cooperative's owner for this cooperative only.</p>}
     </div>
   );
 }
@@ -191,7 +199,7 @@ export function ReviewModal({ cert, mode, busy, error, onConfirm, onClose, noun 
 
 // A farmer's certificates, as seen by the admin or a cooperative's staff:
 // open each one and mark it Verified or Rejected.
-export default function CertificatesPanel({ farmerId, onSignOut }) {
+export default function CertificatesPanel({ farmerId, cooperativeId, onSignOut }) {
   const [items, setItems] = useState([]);
   const [canReview, setCanReview] = useState(false);
   const [credit, setCredit] = useState(null);
@@ -213,7 +221,7 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
     setLoading(true);
     setError("");
     try {
-      const result = await listForFarmer(farmerId);
+      const result = await listForFarmer(farmerId, cooperativeId);
       if (id !== latest.current) return;
       setItems(result.certificates || []);
       setCanReview(Boolean(result.canReview));
@@ -229,7 +237,7 @@ export default function CertificatesPanel({ farmerId, onSignOut }) {
       if (id === latest.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [farmerId]);
+  }, [farmerId, cooperativeId]);
 
   useEffect(() => {
     load();

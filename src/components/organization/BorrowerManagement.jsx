@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { Search } from "lucide-react";
 import { authedRequest } from "../../api";
 import CertificatesPanel from "../shared/CertificatesPanel";
+import CreditLimitModal from "./CreditLimitModal";
+import { getCreditLimit, pesoCentavos } from "../../lib/creditLimits";
+import { messageFrom } from "../../lib/certificates";
 
 const peso = (n) => `₱${n.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 
@@ -63,11 +66,99 @@ function BorrowerRow({ borrower, isSelected, onSelect }) {
   );
 }
 
+// The credit limit this cooperative gives one farmer. Everyone on the staff
+// can see it; only the owner gets the button that changes it.
+function CreditLimitCard({ cooperativeId, farmerId, onChanged, version }) {
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [tries, setTries] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setInfo(null);
+    setError("");
+    if (!cooperativeId) return undefined;
+    getCreditLimit(cooperativeId, farmerId)
+      .then((r) => {
+        if (!cancelled) setInfo(r.creditLimit);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(messageFrom(err, "Could not load the credit limit."));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cooperativeId, farmerId, tries]);
+
+  if (!cooperativeId) return null;
+  return (
+    <div className="mt-5 rounded-xl border border-[#d6e4cf] bg-[#f4f8f3] p-4" data-testid="credit-limit-card" data-version={version}>
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Credit limit with your cooperative</p>
+      {error ? (
+        <p className="mt-2 text-xs text-red-600">
+          {error}{" "}
+          <button onClick={() => setTries((t) => t + 1)} className="font-semibold underline">
+            Try again
+          </button>
+        </p>
+      ) : !info ? (
+        <p className="mt-2 text-xs text-gray-400">Loading…</p>
+      ) : (
+        <>
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xl font-bold text-gray-900" data-testid="credit-limit-value">{pesoCentavos(info.currentLimit)}</p>
+              <p className="text-xs text-gray-500">
+                {info.custom ? `Set by ${info.setByName || "the owner"}` : "Standard limit"} · owes {pesoCentavos(info.outstanding)} here
+              </p>
+              {info.custom && info.note && <p className="mt-1 text-xs text-gray-500 break-words">“{info.note}”</p>}
+            </div>
+            {info.canEdit && (
+              <button
+                onClick={() => {
+                  setNotice("");
+                  setOpen(true);
+                }}
+                className="bg-[#2d4027] hover:bg-[#1f2d1b] text-white px-3 py-1.5 rounded-xl text-xs font-semibold"
+              >
+                Set credit limit
+              </button>
+            )}
+          </div>
+          {info.barangayStatus !== "verified" && (
+            <p className="mt-2 text-xs text-amber-700">Their Barangay Certificate is not verified yet, so they can't borrow until it is.</p>
+          )}
+        </>
+      )}
+      {notice && (
+        <p role="status" className="mt-2 text-xs font-medium text-[#2e7d32]">
+          {notice}
+        </p>
+      )}
+      {open && info && (
+        <CreditLimitModal
+          info={info}
+          onClose={() => setOpen(false)}
+          onSaved={(updated) => {
+            setInfo(updated);
+            setOpen(false);
+            setNotice(`Credit limit saved: ${pesoCentavos(updated.currentLimit)}. ${updated.farmer.name} was notified.`);
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // Shows real loan history instead of fake payment records — there's no
 // real payment-recording flow yet (LoanPayment is still read-only), so
 // rather than invent payment dates and amounts, this shows the actual
 // loan requests themselves, which are genuinely real.
-function BorrowerDetailPanel({ borrower }) {
+function BorrowerDetailPanel({ borrower, cooperativeId }) {
+  const [version, setVersion] = useState(0);
   if (!borrower) {
     return (
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center justify-center text-gray-400 text-sm min-h-[200px]">
@@ -92,6 +183,14 @@ function BorrowerDetailPanel({ borrower }) {
         </div>
       </div>
 
+      <CreditLimitCard
+        key={borrower.id}
+        cooperativeId={cooperativeId}
+        farmerId={borrower.id}
+        version={version}
+        onChanged={() => setVersion((v) => v + 1)}
+      />
+
       <p className="mt-5 text-xs font-bold text-gray-500 uppercase tracking-wider">Loan History</p>
       <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
         {borrower.loans.map((loan) => (
@@ -107,12 +206,12 @@ function BorrowerDetailPanel({ borrower }) {
         ))}
       </div>
 
-      <CertificatesPanel key={borrower.id} farmerId={borrower.id} />
+      <CertificatesPanel key={`${borrower.id}-${version}`} farmerId={borrower.id} cooperativeId={cooperativeId} />
     </div>
   );
 }
 
-export default function BorrowerManagement() {
+export default function BorrowerManagement({ orgInfo }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [loans, setLoans] = useState([]);
@@ -258,7 +357,7 @@ export default function BorrowerManagement() {
         )}
       </div>
 
-      <BorrowerDetailPanel borrower={selectedBorrower} />
+      <BorrowerDetailPanel borrower={selectedBorrower} cooperativeId={orgInfo?.cooperativeId || null} />
     </div>
   );
 }

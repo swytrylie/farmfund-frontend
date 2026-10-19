@@ -356,9 +356,10 @@ const selectClass =
 // Why the farmer can or cannot request a loan right now.
 function CreditBanner({ credit }) {
   if (!credit) return null;
+  const coopLimits = credit.byCooperative || [];
   if (credit.limit <= 0) {
     const text = {
-      none: `Your credit limit is ${peso(0)}. Upload your Barangay Certificate in your farm profile (Certificates tab). Once the FarmFund admin verifies it, your limit becomes ${peso(CREDIT_LIMIT_AMOUNT)} and you can request a loan.`,
+      none: `Your credit limit is ${peso(0)}. Upload your Barangay Certificate in your farm profile (Certificates tab). Once the FarmFund admin verifies it, ${coopLimits.length ? "your credit limits apply" : `your limit becomes ${peso(CREDIT_LIMIT_AMOUNT)}`} and you can request a loan.`,
       pending: `Your credit limit is ${peso(0)} for now. Your Barangay Certificate is waiting for the FarmFund admin to verify it. You can request a loan once it is verified.`,
       rejected: `Your credit limit is ${peso(0)}. Your Barangay Certificate was rejected. Upload a new one in your farm profile (Certificates tab).`,
     }[credit.barangayStatus];
@@ -372,7 +373,9 @@ function CreditBanner({ credit }) {
   return (
     <div data-testid="credit-banner" className="mt-4 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-semibold text-gray-900">Credit limit {peso(credit.limit)}</p>
+        <p className="text-sm font-semibold text-gray-900">
+          {coopLimits.length ? "Standard credit limit" : "Credit limit"} {peso(credit.limit)}
+        </p>
         <p className="text-sm text-gray-600">
           Used {peso(credit.used)} · <span className="font-semibold text-[#3f6238]">Available {peso(credit.available)}</span>
         </p>
@@ -380,6 +383,23 @@ function CreditBanner({ credit }) {
       <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden" aria-hidden="true">
         <div className="h-full bg-[#4f7331]" style={{ width: `${pct}%` }} />
       </div>
+      {coopLimits.length > 0 && (
+        <>
+          <p className="mt-1 text-[11px] text-gray-400">Applies to cooperatives that have not set their own limit for you.</p>
+          <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3" data-testid="coop-limits">
+            {coopLimits.map((c) => (
+              <li key={c.cooperativeId} className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                <span className="font-semibold text-gray-900">
+                  {c.cooperativeName || "A cooperative"} set your limit to {peso(c.setLimit)}
+                </span>
+                <span className="text-gray-600">
+                  Used {peso(c.used)} · <span className="font-semibold text-[#3f6238]">Available {peso(c.available)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -407,7 +427,10 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
   const fileInput = useRef(null);
   // The most a farmer can borrow is whatever credit they still have. (If the
   // credit figures did not load, the server still checks every request.)
-  const cap = credit ? credit.available : null;
+  // If this cooperative's owner set a limit for the farmer, that limit (and what
+  // is owed to that cooperative) is what counts for a loan with it.
+  const shown = credit ? (credit.byCooperative || []).find((c) => c.cooperativeId === String(cooperative)) || credit : null;
+  const cap = shown ? shown.available : null;
   const overLimit = cap !== null && Math.round((Number(principalAmount) || 0) * 100) > Math.round(cap * 100);
 
   function loadOptions() {
@@ -462,11 +485,11 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
       setError("Enter a principal amount of at least ₱1.");
       return;
     }
-    if (credit && overLimit) {
+    if (shown && overLimit) {
       setError(
-        credit.available > 0
-          ? `That is more than your available credit. You can borrow up to ${peso(credit.available)}.`
-          : "You have no available credit right now."
+        shown.available > 0
+          ? `That is more than your available credit. You can borrow up to ${peso(shown.available)}.`
+          : "You have no available credit with this cooperative right now."
       );
       return;
     }
@@ -570,13 +593,13 @@ function NewLoanModal({ cooperatives, credit, onSave, onCancel }) {
             }`}
           >
             {principalAmount ? peso(Number(principalAmount)) : "₱0.00"}
-            {credit ? ` / ${peso(credit.available)} available` : ""}
+            {shown ? ` / ${peso(shown.available)} available` : ""}
             {overLimit && " — over your available credit"}
           </p>
-          {credit && credit.available > 0 && (
+          {shown && shown.available > 0 && (
             <button
               type="button"
-              onClick={() => setPrincipalAmount(String(credit.available))}
+              onClick={() => setPrincipalAmount(String(shown.available))}
               className="mt-1 text-[11px] font-medium text-[#4f7331] hover:underline"
             >
               Borrow my full available credit
@@ -1363,7 +1386,7 @@ export default function LoansDebt() {
   const pendingCount = loans.filter((l) => l.status === "pending" || l.status === "pending_admin").length;
   const canPay = loans.some(isPayable);
   // Only block the button when we know the limit; if it could not be loaded the server still decides.
-  const cannotRequest = Boolean(credit) && credit.available <= 0;
+  const cannotRequest = Boolean(credit) && credit.available <= 0 && !(credit.byCooperative || []).some((c) => c.available > 0);
   const waitingByLoan = proofs.reduce((acc, p) => (p.status === "pending" ? { ...acc, [p.loanId]: (acc[p.loanId] || 0) + 1 } : acc), {});
   const selectedProofs = proofs.filter((p) => p.loanId === selectedId);
 

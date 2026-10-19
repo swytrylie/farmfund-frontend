@@ -4,7 +4,10 @@ export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
 export const listMine = () => authedRequest("/api/certificates");
-export const getCredit = () => authedRequest("/api/certificates/credit");
+// With a cooperative id, the limit that applies to loans with THAT cooperative
+// (its owner may have set a different one).
+const withCoop = (cooperativeId) => (cooperativeId ? `?cooperative=${encodeURIComponent(cooperativeId)}` : "");
+export const getCredit = (cooperativeId) => authedRequest(`/api/certificates/credit${withCoop(cooperativeId)}`);
 // The admin's review queue: every farmer's certificates in one list.
 export function listCertificateQueue({ status = "pending", type = "all", search = "", page = 1, limit = 20 } = {}) {
   const q = new URLSearchParams();
@@ -15,7 +18,7 @@ export function listCertificateQueue({ status = "pending", type = "all", search 
   q.set("limit", String(limit));
   return authedRequest(`/api/certificates/queue?${q.toString()}`);
 }
-export const listForFarmer = (farmerId) => authedRequest(`/api/certificates/farmer/${farmerId}`);
+export const listForFarmer = (farmerId, cooperativeId) => authedRequest(`/api/certificates/farmer/${farmerId}${withCoop(cooperativeId)}`);
 export const uploadCertificate = (formData) => authedRequest("/api/certificates", { method: "POST", body: formData });
 export const deleteCertificate = (id) => authedRequest(`/api/certificates/${id}`, { method: "DELETE" });
 export const reviewCertificate = (id, status, note) =>
