@@ -22,7 +22,10 @@ export default function AuthPanel({
   onFailedAttempt,
   onLoginSuccess,
   lockoutSecondsLeft,
-  onSimulateEscalation,
+  lockEmail,
+  lockRequestSent,
+  onLockMessageSent,
+  loginNotice,
 }) {
   const [visible, setVisible] = useState(false);
 
@@ -83,6 +86,7 @@ export default function AuthPanel({
               attemptsRemaining={attemptsRemaining}
               onFailedAttempt={onFailedAttempt}
               onLoginSuccess={onLoginSuccess}
+              notice={loginNotice}
             />
           )}
           {mode === "signup-role" && (
@@ -103,8 +107,10 @@ export default function AuthPanel({
           {mode === "locked" && (
             <LockedForm
               secondsLeft={lockoutSecondsLeft}
+              email={lockEmail}
+              requestSent={lockRequestSent}
+              onMessageSent={onLockMessageSent}
               onReturnToLogin={() => onSwitchMode("login")}
-              onSimulateEscalation={onSimulateEscalation}
             />
           )}
           {mode === "account-success" && (

@@ -8,6 +8,7 @@ export default function LoginForm({
   onSwitchMode,
   onFailedAttempt,
   onLoginSuccess,
+  notice,
 }) {
   const [data, setData] = useState({ email: "", password: "", remember: false });
   const [errors, setErrors] = useState({});
@@ -43,9 +44,10 @@ export default function LoginForm({
       // The server uses 403 for several different reasons. Only the real
       // lockout (too many wrong passwords) opens the locked screen; the others
       // — email not verified yet, organization waiting for approval or
-      // declined — are shown as a plain message under the form.
-      if (err.status === 403 && /temporarily locked/i.test(err.message || "")) {
-        onFailedAttempt?.({ locked: true });
+      // declined — are shown as a plain message under the form. The lockout
+      // answer carries when the lock ends, so the screen shows the real time.
+      if (err.code === "ACCOUNT_LOCKED" || (err.status === 403 && /temporarily locked/i.test(err.message || ""))) {
+        onFailedAttempt?.({ locked: true, email: data.email.trim(), details: err.details });
       } else {
         setServerError(err.message);
       }
@@ -57,6 +59,15 @@ export default function LoginForm({
   return (
     <>
       <h2 className="text-3xl font-bold text-white text-center">Hi, Welcome!</h2>
+
+      {notice && (
+        <p
+          data-testid="login-notice"
+          className="mt-4 rounded-lg bg-green-500/15 border border-green-400/30 px-4 py-2.5 text-center text-sm text-green-100"
+        >
+          {notice}
+        </p>
+      )}
 
       <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
         <FormInput

@@ -1,11 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TrendingUp, CreditCard, Lightbulb } from "lucide-react";
 import AuthPanel from "./AuthPanel";
 import DevNavBar from "./DevNavBar";
+import { apiRequest } from "../../api";
 import {
-  LOCKOUT_TIER_SECONDS,
-  MAX_LOGIN_ATTEMPTS,
-  nextLockoutTier,
+  LOCK_POLL_MS,
+  clearStoredLock,
+  lockFromServer,
+  readStoredLock,
+  secondsLeftUntil,
+  storeLock,
 } from "../../lib/lockout";
 
 const features = [
@@ -15,8 +19,11 @@ const features = [
 ];
 
 export default function FarmFund({ onLoginSuccess }) {
+  // The lock saved in this browser (if one is still running): after a page
+  // refresh the locked screen comes straight back, with the real time left.
+  const [lock, setLock] = useState(() => readStoredLock());
   // "none" = plain landing page, everything else is an AuthPanel state
-  const [view, setView] = useState("none");
+  const [view, setView] = useState(() => (readStoredLock() ? "locked" : "none"));
   // Carries the email forward into the OTP screen, set whenever a form navigates there
   const [otpEmail, setOtpEmail] = useState("");
   // Carries the chosen role from role-selection into the signup form
@@ -24,10 +31,14 @@ export default function FarmFund({ onLoginSuccess }) {
   // Carries the organization's name into the pending-approval screen
   const [organizationName, setOrganizationName] = useState("");
 
-  // ---- Lockout state ----
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [lockoutTier, setLockoutTier] = useState(0); // 0 = not locked
-  const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
+  // ---- Lockout ----
+  // The server decides when a lock ends. The countdown is "end time minus now",
+  // recalculated every second, so it can never drift or restart.
+  const [now, setNow] = useState(() => Date.now());
+  const [loginNotice, setLoginNotice] = useState("");
+  const lockRef = useRef(lock);
+  lockRef.current = lock;
+  const lockoutSecondsLeft = lock ? secondsLeftUntil(lock.endsAt, now) : 0;
 
   function handleSwitchMode(nextMode, payload) {
     // Organization signup logs straight into the Org Dashboard, reusing
@@ -55,50 +66,112 @@ export default function FarmFund({ onLoginSuccess }) {
     setView("signup");
   }
 
-  function startLockout(tier) {
-    setLockoutTier(tier);
-    setLockoutSecondsLeft(LOCKOUT_TIER_SECONDS[tier]);
+  function showLock(next) {
+    if (!next.preview) storeLock(next);
+    setLock(next);
+    setNow(Date.now());
     setView("locked");
   }
 
-    // Called by LoginForm when the server reports the account is locked.
-  // The backend locks for 15 minutes, which matches lockout tier 1.
-  function handleFailedAttempt(info) {
-    if (info?.locked) startLockout(1);
+  // The lock is over (the timer ran out, or an admin unlocked the account).
+  function endLock(message) {
+    clearStoredLock();
+    setLock(null);
+    setLoginNotice(message);
+    setView("login");
   }
 
-  // Dev-only control: simulate another failed attempt while already locked,
-  // escalating the tier and extending the timer.
-  function handleSimulateEscalation() {
-    setLockoutTier((prevTier) => {
-      const tier = nextLockoutTier(prevTier || 1);
-      setLockoutSecondsLeft(LOCKOUT_TIER_SECONDS[tier]);
-      return tier;
-    });
+  // Called by LoginForm when the server says the account is locked. The answer
+  // carries how many seconds are left, which is what the screen counts down.
+  function handleFailedAttempt(info) {
+    if (!info?.locked) return;
+    const fromServer = lockFromServer(info.details, info.email);
+    const stored = readStoredLock();
+    const sameAsStored = stored && stored.email === info.email;
+    showLock(
+      fromServer ||
+        (sameAsStored
+          ? stored
+          : { email: info.email || "", endsAt: Date.now() + 15 * 60 * 1000, minutes: 15, requestSent: false })
+    );
+  }
+
+  // The person wrote to the admin: remember it, so a refresh still says so.
+  function handleLockMessageSent() {
+    const next = { ...lockRef.current, requestSent: true };
+    setLock(next);
+    if (!next.preview) storeLock(next);
   }
 
   // Ticks the countdown once per second while locked
   useEffect(() => {
     if (view !== "locked") return;
-    const timer = setInterval(() => {
-      setLockoutSecondsLeft((s) => Math.max(0, s - 1));
-    }, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [view]);
 
-  // Auto-unlock the moment the countdown hits zero
+  // The moment the countdown reaches zero, back to the login form
   useEffect(() => {
-    if (view === "locked" && lockoutSecondsLeft === 0) {
-      setView("login");
-      setLockoutTier(0);
-      setFailedAttempts(0);
+    if (view === "locked" && lock && lockoutSecondsLeft === 0) {
+      endLock("Your lock has ended. You can try logging in again.");
     }
-  }, [view, lockoutSecondsLeft]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, lock, lockoutSecondsLeft]);
 
-  // Dev nav: jumping straight to "locked" seeds a tier-1 timer if none is running yet
+  // While the locked screen is open, ask the server every 30 seconds whether
+  // the account is still locked: an admin may have unlocked it, and the
+  // server's clock is the one that counts.
+  const lockEmail = lock && !lock.preview ? lock.email : "";
+  useEffect(() => {
+    if (view !== "locked" || !lockEmail) return;
+    let cancelled = false;
+
+    async function check() {
+      try {
+        const status = await apiRequest("/api/auth/lock-status", {
+          method: "POST",
+          body: { email: lockEmail },
+        });
+        if (cancelled) return;
+        if (!status.locked) {
+          endLock("Your account has been unlocked. You can log in now.");
+          return;
+        }
+        const fresh = lockFromServer(status, lockEmail);
+        const current = lockRef.current;
+        if (!fresh || !current) return;
+        const next = {
+          ...current,
+          requestSent: current.requestSent || fresh.requestSent,
+          minutes: fresh.minutes || current.minutes,
+          // only move the end time when it really differs (not for a second of network delay)
+          endsAt: Math.abs(fresh.endsAt - current.endsAt) > 2000 ? fresh.endsAt : current.endsAt,
+        };
+        setLock(next);
+        storeLock(next);
+      } catch {
+        // could not ask (offline?): the countdown keeps going on its own
+      }
+    }
+
+    check();
+    const timer = setInterval(check, LOCK_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, lockEmail]);
+
+  // Dev nav: "Locked" shows the real lock when there is one; otherwise a
+  // preview timer that is not saved (so it never sticks after a refresh).
   function handleDevNavigate(key) {
     if (key === "locked") {
-      startLockout(lockoutTier || 1);
+      if (lock) {
+        setView("locked");
+      } else {
+        showLock({ email: "", endsAt: Date.now() + 15 * 60 * 1000, minutes: 15, requestSent: false, preview: true });
+      }
     } else {
       setView(key);
     }
@@ -152,7 +225,10 @@ export default function FarmFund({ onLoginSuccess }) {
             {/* CTA Buttons */}
             <div className="mt-10 flex flex-col sm:flex-row gap-4">
               <button
-                onClick={() => setView("login")}
+                onClick={() => {
+                  setLoginNotice("");
+                  setView("login");
+                }}
                 className="inline-flex items-center justify-center px-7 py-3.5 rounded-lg bg-[#42BD41] text-white font-bold text-base shadow-lg shadow-black/20 hover:bg-[#379637] active:bg-[#2f7f2f] transition-colors duration-200"
               >
                 Log In
@@ -181,11 +257,16 @@ export default function FarmFund({ onLoginSuccess }) {
           onSelectRole={handleSelectRole}
           onClose={() => setView("none")}
           onSwitchMode={handleSwitchMode}
-          attemptsRemaining={MAX_LOGIN_ATTEMPTS - failedAttempts}
           onFailedAttempt={handleFailedAttempt}
-          onLoginSuccess={onLoginSuccess}
+          onLoginSuccess={(data) => {
+            clearStoredLock();
+            onLoginSuccess(data);
+          }}
           lockoutSecondsLeft={lockoutSecondsLeft}
-          onSimulateEscalation={handleSimulateEscalation}
+          lockEmail={lock ? lock.email : ""}
+          lockRequestSent={Boolean(lock && lock.requestSent)}
+          onLockMessageSent={handleLockMessageSent}
+          loginNotice={loginNotice}
         />
       )}
 

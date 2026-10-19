@@ -5,6 +5,7 @@ import {
   Shield,
   Activity,
   UserCheck,
+  Lock,
   ClipboardList,
   BarChart3,
   Megaphone,
@@ -36,6 +37,7 @@ import UserManagement from "./UserManagement";
 import FarmManagement from "./FarmManagement";
 import UserActivityMonitoring from "./UserActivityMonitoring";
 import AccountStatusManagement from "./AccountStatusManagement";
+import LockedAccounts from "./LockedAccounts";
 import FinancialRecordMonitoring from "./FinancialRecordMonitoring";
 import ReportsAnalytics from "./ReportsAnalytics";
 import NotificationManagement, { AnnouncementDetailsModal } from "./NotificationManagement";
@@ -59,6 +61,7 @@ const NAV_GROUPS = [
       { icon: Shield, label: "Farm Management" },
       { icon: Activity, label: "User Activity" },
       { icon: UserCheck, label: "Account Status" },
+      { icon: Lock, label: "Locked Accounts" },
     ],
   },
   {
@@ -91,7 +94,7 @@ const NAV_GROUPS = [
   },
 ];
 
-function SidebarNavItem({ icon: Icon, label, active, onClick }) {
+function SidebarNavItem({ icon: Icon, label, active, onClick, badge = 0 }) {
   return (
     <button
       onClick={onClick}
@@ -103,6 +106,14 @@ function SidebarNavItem({ icon: Icon, label, active, onClick }) {
     >
       <Icon size={18} className="shrink-0" />
       {label}
+      {badge > 0 && (
+        <span
+          data-testid="nav-badge"
+          className="ml-auto min-w-[18px] h-[18px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center"
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -336,7 +347,7 @@ function PendingApprovals({ approvals, busyId, onApprove, onDecline }) {
   );
 }
 
-function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpenLoanAlert, onOpenClaimAlert, onOpened }) {
+function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlerts = [], lockAlerts = [], onMarkAllRead, onDismiss, onViewAll, onOpenAnnouncement, onOpenCertAlert, onOpenLoanAlert, onOpenClaimAlert, onOpenLockAlert, onOpened }) {
   const [isOpen, setIsOpen] = useState(false);
   // Tracked separately from the real announcements data — dismissing a
   // card here only hides it from THIS popup. The actual sent-announcement
@@ -347,11 +358,12 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlert
 
   const visibleAnnouncements = announcements.filter((a) => !dismissedIds.has(a.id));
   const recentAnnouncements = visibleAnnouncements.slice(0, 5);
-  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread) || loanAlerts.some((n) => n.unread) || claimAlerts.some((n) => n.unread);
+  const hasUnread = visibleAnnouncements.some((a) => a.unread) || certAlerts.some((n) => n.unread) || loanAlerts.some((n) => n.unread) || claimAlerts.some((n) => n.unread) || lockAlerts.some((n) => n.unread);
   const recentCertAlerts = certAlerts.slice(0, 5);
   const recentLoanAlerts = loanAlerts.slice(0, 5);
   const recentClaimAlerts = claimAlerts.slice(0, 5);
-  const noAlerts = recentCertAlerts.length === 0 && recentLoanAlerts.length === 0 && recentClaimAlerts.length === 0;
+  const recentLockAlerts = lockAlerts.slice(0, 5);
+  const noAlerts = recentCertAlerts.length === 0 && recentLoanAlerts.length === 0 && recentClaimAlerts.length === 0 && recentLockAlerts.length === 0;
 
   function handleDismiss(id) {
     setDismissedIds((prev) => new Set(prev).add(id));
@@ -381,6 +393,11 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlert
   function handleOpenLoan(n) {
     setIsOpen(false);
     onOpenLoanAlert?.(n);
+  }
+
+  function handleOpenLock(n) {
+    setIsOpen(false);
+    onOpenLockAlert?.(n);
   }
 
   return (
@@ -417,6 +434,39 @@ function AdminBell({ announcements, certAlerts = [], loanAlerts = [], claimAlert
           </div>
 
           <div className="px-3 py-2 space-y-2 max-h-80 overflow-y-auto">
+            {recentLockAlerts.length > 0 && (
+              <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Locked accounts</p>
+            )}
+            {recentLockAlerts.map((n) => (
+              <div key={n.id} data-testid="lock-alert" className="relative bg-[#fdf2f2] rounded-xl p-3.5">
+                {n.unread && <span className="absolute top-3.5 left-3 w-2 h-2 rounded-full bg-green-500" />}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open locked accounts: ${n.message}`}
+                  onClick={() => handleOpenLock(n)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenLock(n);
+                    }
+                  }}
+                  className="flex items-start gap-3 pl-4 cursor-pointer"
+                >
+                  <span className="w-8 h-8 rounded-lg bg-[#fbdcdc] flex items-center justify-center shrink-0">
+                    <Lock size={16} className="text-[#b42318]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-900">{n.title}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 break-words">{n.message}</p>
+                    {n.details?.reason && (
+                      <p className="text-xs text-gray-500 mt-1 italic break-words line-clamp-2">“{n.details.reason}”</p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">{timeAgo(n.at)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
             {recentLoanAlerts.length > 0 && (
               <p className="px-1 pt-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Loan collateral to verify</p>
             )}
@@ -678,6 +728,8 @@ export default function AdminDashboard({ user, onSignOut }) {
   const loanAlerts = notifications.items.filter((n) => n.kind === "loan_submitted");
   // "A farmer asked for disaster relief" alerts.
   const claimAlerts = notifications.items.filter((n) => n.kind === "claim_submitted");
+  // "Someone is locked out and wrote to the admin" alerts.
+  const lockAlerts = notifications.items.filter((n) => n.kind === "account_locked");
   const reloadNotifications = notifications.reload;
   useEffect(() => {
     // Check again every minute so a new submission shows up without a reload.
@@ -696,6 +748,12 @@ export default function AdminDashboard({ user, onSignOut }) {
     notifications.markRead(n.id);
     setStartOnCertificates(false);
     setActiveItem("Loan Collateral");
+  }
+
+  function handleOpenLockAlert(n) {
+    notifications.markRead(n.id);
+    setStartOnCertificates(false);
+    setActiveItem("Locked Accounts");
   }
 
   function handleOpenClaimAlert(n) {
@@ -873,6 +931,7 @@ export default function AdminDashboard({ user, onSignOut }) {
                     icon={item.icon}
                     label={item.label}
                     active={item.label === activeItem}
+                    badge={item.label === "Locked Accounts" ? lockAlerts.filter((n) => n.unread).length : 0}
                     onClick={() => {
                       setStartOnCertificates(false);
                       setActiveItem(item.label);
@@ -913,6 +972,8 @@ export default function AdminDashboard({ user, onSignOut }) {
             certAlerts={certAlerts}
             loanAlerts={loanAlerts}
             claimAlerts={claimAlerts}
+            lockAlerts={lockAlerts}
+            onOpenLockAlert={handleOpenLockAlert}
             onOpenCertAlert={handleOpenCertAlert}
             onOpenLoanAlert={handleOpenLoanAlert}
             onOpenClaimAlert={handleOpenClaimAlert}
@@ -958,6 +1019,8 @@ export default function AdminDashboard({ user, onSignOut }) {
           <UserActivityMonitoring onSignOut={onSignOut} />
         ) : activeItem === "Account Status" ? (
           <AccountStatusManagement onSignOut={onSignOut} />
+        ) : activeItem === "Locked Accounts" ? (
+          <LockedAccounts />
         ) : activeItem === "Financial Record Monitoring" ? (
           <FinancialRecordMonitoring onSignOut={onSignOut} />
         ) : activeItem === "Reports & Analytics" ? (

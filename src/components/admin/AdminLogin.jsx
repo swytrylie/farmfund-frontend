@@ -56,7 +56,10 @@ export default function AdminLogin({ onLoginSuccess }) {
 
       onLoginSuccess(result); // { accessToken, user }
     } catch (err) {
-      if (err.status === 403) {
+      if (err.code === "ACCOUNT_LOCKED") {
+        const minutes = Math.max(1, Math.ceil((err.details?.secondsLeft || 0) / 60));
+        setErrors({ password: `Account temporarily locked after too many wrong passwords. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.` });
+      } else if (err.status === 403) {
         setErrors({ password: "Account temporarily locked due to too many failed attempts." });
       } else if (err.status === 401) {
         setErrors({ password: "Invalid email or password." });
