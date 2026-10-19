@@ -48,6 +48,7 @@ export async function apiRequest(path, { method = 'GET', body, token } = {}) {
         : null;
     const error = new Error(specific || json?.message || `Request failed (${res.status})`);
     error.status = res.status;
+    error.code = json?.code; // e.g. SESSION_IDLE, MAINTENANCE
     error.details = json?.details;
     throw error;
   }
@@ -96,9 +97,11 @@ export async function authedRequest(path, options = {}) {
     try {
       const fresh = await refreshSession();
       accessToken = fresh.accessToken;
-    } catch {
+    } catch (refreshErr) {
       accessToken = null;
-      onSessionExpired();
+      // Tell the app WHY, so a sign-out for inactivity can say so.
+      const idle = err.code === 'SESSION_IDLE' || refreshErr?.code === 'SESSION_IDLE';
+      onSessionExpired(idle ? 'SESSION_IDLE' : undefined);
       throw err;
     }
     return apiRequest(path, { ...options, token: accessToken });
@@ -125,9 +128,9 @@ export async function streamAuthedText(path, { body, onChunk, signal } = {}) {
   try {
     res = await send();
     if (res.status === 401) {
-      const fresh = await refreshSession().catch(() => {
+      const fresh = await refreshSession().catch((refreshErr) => {
         accessToken = null;
-        onSessionExpired();
+        onSessionExpired(refreshErr?.code === 'SESSION_IDLE' ? 'SESSION_IDLE' : undefined);
         throw new Error('Your session expired. Please sign in again.');
       });
       accessToken = fresh.accessToken;
@@ -150,6 +153,7 @@ export async function streamAuthedText(path, { body, onChunk, signal } = {}) {
     const specific = Array.isArray(json?.details) && typeof json.details[0]?.message === 'string' ? json.details[0].message : null;
     const error = new Error(specific || json?.message || `Request failed (${res.status})`);
     error.status = res.status;
+    error.code = json?.code;
     throw error;
   }
 

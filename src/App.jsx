@@ -8,6 +8,8 @@ import CompleteAccount from "./components/organization/CompleteAccount";
 import SecureAccount from "./components/organization/SecureAccount";
 import MaintenanceScreen from "./components/shared/MaintenanceScreen";
 import LoginToast from "./components/shared/LoginToast";
+import IdleGuard from "./components/shared/IdleGuard";
+import { IDLE_MESSAGE, isIdleError } from "./lib/idle";
 import {
   apiRequest,
   refreshSession,
@@ -38,6 +40,8 @@ function App() {
   // The "you're logged in" message shown right after a farmer or cooperative
   // signs in. A page refresh that restores the session does not show it.
   const [loginToast, setLoginToast] = useState("");
+  // Shown on the login page after someone was signed out for being idle.
+  const [idleNotice, setIdleNotice] = useState("");
   const [checking, setChecking] = useState(true);
 
   // Admin uses its own separate session state, kept independent of the
@@ -55,7 +59,8 @@ function App() {
 
   // If a refresh ever fails mid-session, drop back to the login screen.
   useEffect(() => {
-    setSessionExpiredHandler(() => {
+    setSessionExpiredHandler((reason) => {
+      if (reason === "SESSION_IDLE") setIdleNotice(IDLE_MESSAGE);
       setSession(null);
       setAdminSession(null);
     });
@@ -98,8 +103,10 @@ function App() {
         // in on /admin only, so here it just sees the normal login page.
         if (!cancelled && user.role !== "admin") setSession({ accessToken, user });
         else setAccessToken(null);
-      } catch {
-        // No valid cookie: just show the landing/login page.
+      } catch (err) {
+        // No valid cookie: just show the landing/login page — and say why if
+        // the session ended because the person was away too long.
+        if (!cancelled && isIdleError(err)) setIdleNotice(IDLE_MESSAGE);
       } finally {
         if (!cancelled) setChecking(false);
       }
@@ -125,8 +132,9 @@ function App() {
         const user = await apiRequest("/api/auth/me", { token: accessToken });
         if (!cancelled && user.role === "admin") setAdminSession({ accessToken, user });
         else setAccessToken(null);
-      } catch {
-        // No valid cookie: show the admin login.
+      } catch (err) {
+        // No valid cookie: show the admin login (with the reason, if idle).
+        if (!cancelled && isIdleError(err)) setIdleNotice(IDLE_MESSAGE);
       } finally {
         if (!cancelled) setChecking(false);
       }
@@ -162,6 +170,26 @@ function App() {
     setAdminSession(null);
   }
 
+  // Ten minutes without any activity: end the session here and on the server,
+  // and leave a notice on the login page explaining why.
+  async function handleIdleTimeout() {
+    setIdleNotice(IDLE_MESSAGE);
+    setLoginToast("");
+    setAccessToken(null);
+    setSession(null);
+    setAdminSession(null);
+    try {
+      await apiRequest("/api/auth/logout", { method: "POST" });
+    } catch {
+      // The browser side is already signed out; the server also ends the
+      // session by itself when the idle time passes.
+    }
+  }
+
+  const idleBanner = idleNotice ? (
+    <LoginToast tone="warning" seconds={0} message={idleNotice} onClose={() => setIdleNotice("")} />
+  ) : null;
+
   // Maintenance mode: everyone except the admin pages sees this, whatever
   // page they were on. It lets them back in when maintenance ends.
   if (maintenance && !isAdminPath) {
@@ -192,10 +220,13 @@ function App() {
   if (isAdminPath) {
     if (adminSession) {
       return (
-        <AdminDashboard
-          user={adminSession.user}
-          onSignOut={handleAdminSignOut}
-        />
+        <>
+          <AdminDashboard
+            user={adminSession.user}
+            onSignOut={handleAdminSignOut}
+          />
+          <IdleGuard onTimeout={handleIdleTimeout} onSignOut={handleAdminSignOut} />
+        </>
       );
     }
     if (checking) {
@@ -206,12 +237,16 @@ function App() {
       );
     }
     return (
-      <AdminLogin
-        onLoginSuccess={(data) => {
-          setAccessToken(data.accessToken);
-          setAdminSession(data);
-        }}
-      />
+      <>
+        <AdminLogin
+          onLoginSuccess={(data) => {
+            setAccessToken(data.accessToken);
+            setIdleNotice("");
+            setAdminSession(data);
+          }}
+        />
+        {idleBanner}
+      </>
     );
   }
 
@@ -234,6 +269,7 @@ function App() {
         <>
           <OrgDashboard user={session.user} onSignOut={handleSignOut} />
           {toast}
+          <IdleGuard onTimeout={handleIdleTimeout} onSignOut={handleSignOut} />
         </>
       );
     }
@@ -241,6 +277,7 @@ function App() {
       <>
         <Dashboard user={session.user} onSignOut={handleSignOut} />
         {toast}
+        <IdleGuard onTimeout={handleIdleTimeout} onSignOut={handleSignOut} />
       </>
     );
   }
@@ -249,14 +286,18 @@ function App() {
   // Organization signup also lands here, through the same real backend
   // flow (register() + an immediate login()), not a separate mocked path.
   return (
-    <FarmFund
-      onLoginSuccess={(data) => {
-        setAccessToken(data.accessToken);
-        setSession(data);
-        const first = (data.user?.firstName || "").trim();
-        setLoginToast(first ? `Welcome back, ${first}! You're logged in.` : "You're logged in.");
-      }}
-    />
+    <>
+      <FarmFund
+        onLoginSuccess={(data) => {
+          setAccessToken(data.accessToken);
+          setSession(data);
+          setIdleNotice("");
+          const first = (data.user?.firstName || "").trim();
+          setLoginToast(first ? `Welcome back, ${first}! You're logged in.` : "You're logged in.");
+        }}
+      />
+      {idleBanner}
+    </>
   );
 }
 
