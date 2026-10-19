@@ -138,7 +138,7 @@ export default function AIAdvisorWidget() {
 
           {/* Message body */}
           <div className="bg-[#f7f8f6] p-4 flex-1 min-h-0 overflow-y-auto space-y-4" aria-live="polite">
-            {loading && <p className="text-xs text-gray-400 text-center py-6">Loading advisor…</p>}
+            {loading && <p className="text-xs text-gray-400 text-center py-6">Preparing today's advice… this can take a few seconds.</p>}
             {loadError && !loading && (
               <div className="text-center py-6 space-y-2">
                 <p className="text-xs text-gray-600">Couldn't load the advisor. {loadError.message}</p>

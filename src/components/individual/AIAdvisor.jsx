@@ -25,7 +25,7 @@ function SeasonPanel({ advisor, open, onToggle, onAsk, disabled }) {
           </span>
           <span className="min-w-0">
             <span className="block font-bold text-gray-900 text-sm">What to plant now{where}</span>
-            <span className="block text-xs text-gray-500 truncate">
+            <span className="block text-xs text-gray-500">
               {advisor.season?.label}
               {advisor.weather ? `. Next 7 days: ${advisor.weather.rainNext7DaysMm} mm of rain` : ""}
             </span>
@@ -137,7 +137,10 @@ export default function AIAdvisor() {
         {header}
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-400 text-sm">
           {loading ? (
-            "Loading advisor…"
+            <p className="text-center">
+              Your AI Farm Advisor is preparing today's advice…
+              <span className="block text-xs mt-1">This can take up to 20 seconds the first time each day.</span>
+            </p>
           ) : (
             <>
               <p className="text-gray-600">Couldn't load the advisor. {loadError.message}</p>
