@@ -83,10 +83,23 @@ function ReliefCard({ loan, onFreeze }) {
         A FarmFund admin checked the farmer's proof and verified it on {dateLocal(claim.review?.reviewedAt || claim.createdAt)}.
       </p>
       {claim.description && <p className="mt-2 text-sm text-gray-700 whitespace-pre-line">{claim.description}</p>}
-      {claim.hasFile && (
-        <button onClick={viewProof} className="mt-2 text-xs font-semibold text-sky-800 underline hover:text-sky-950">
-          View proof
-        </button>
+      {/* The two buttons sit in one wrapping row so they can never overlap */}
+      {(claim.hasFile || (!fr && relief.canFreeze)) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-3">
+          {claim.hasFile && (
+            <button onClick={viewProof} className="text-xs font-semibold text-sky-800 underline hover:text-sky-950">
+              View proof
+            </button>
+          )}
+          {!fr && relief.canFreeze && (
+            <button
+              onClick={onFreeze}
+              className="px-4 py-2 rounded-xl bg-sky-700 text-white text-sm font-semibold hover:bg-sky-800 transition-colors"
+            >
+              Activate calamity freeze
+            </button>
+          )}
+        </div>
       )}
       {proofError && <p className="mt-1 text-xs text-red-600">{proofError}</p>}
 
@@ -96,14 +109,7 @@ function ReliefCard({ loan, onFreeze }) {
           {fr.running ? "Calamity freeze active" : "Calamity freeze ended"}: no new interest until {dateLocal(fr.endsAt)}. Due date moved from{" "}
           {dateLocal(fr.previousDueDate)} to {dateLocal(fr.newDueDate)}.
         </p>
-      ) : relief.canFreeze ? (
-        <button
-          onClick={onFreeze}
-          className="mt-3 px-4 py-2 rounded-xl bg-sky-700 text-white text-sm font-semibold hover:bg-sky-800 transition-colors"
-        >
-          Activate calamity freeze
-        </button>
-      ) : (
+      ) : relief.canFreeze ? null : (
         <p className="mt-3 text-xs text-sky-800">Only the cooperative's owner can activate the calamity freeze.</p>
       )}
     </div>

@@ -7,6 +7,7 @@ import AdminDashboard from "./components/admin/AdminDashboard";
 import CompleteAccount from "./components/organization/CompleteAccount";
 import SecureAccount from "./components/organization/SecureAccount";
 import MaintenanceScreen from "./components/shared/MaintenanceScreen";
+import LoginToast from "./components/shared/LoginToast";
 import {
   apiRequest,
   refreshSession,
@@ -34,6 +35,9 @@ function App() {
   // { accessToken, user } while logged in, null otherwise. Memory only:
   // never put the access token in localStorage.
   const [session, setSession] = useState(null);
+  // The "you're logged in" message shown right after a farmer or cooperative
+  // signs in. A page refresh that restores the session does not show it.
+  const [loginToast, setLoginToast] = useState("");
   const [checking, setChecking] = useState(true);
 
   // Admin uses its own separate session state, kept independent of the
@@ -108,6 +112,7 @@ function App() {
       // Even if the request fails, still sign out locally.
     }
     setAccessToken(null);
+    setLoginToast("");
     setSession(null);
   }
 
@@ -183,10 +188,21 @@ function App() {
     // individual farmer one. accountType is set by the backend itself
     // (checked via real CooperativeMember records on both login and
     // session restore), not something the frontend decides on its own.
+    const toast = loginToast ? <LoginToast message={loginToast} onClose={() => setLoginToast("")} /> : null;
     if (session.user?.accountType === "organization") {
-      return <OrgDashboard user={session.user} onSignOut={handleSignOut} />;
+      return (
+        <>
+          <OrgDashboard user={session.user} onSignOut={handleSignOut} />
+          {toast}
+        </>
+      );
     }
-    return <Dashboard user={session.user} onSignOut={handleSignOut} />;
+    return (
+      <>
+        <Dashboard user={session.user} onSignOut={handleSignOut} />
+        {toast}
+      </>
+    );
   }
 
   // LoginForm passes { accessToken, user } here after a successful login.
@@ -197,6 +213,8 @@ function App() {
       onLoginSuccess={(data) => {
         setAccessToken(data.accessToken);
         setSession(data);
+        const first = (data.user?.firstName || "").trim();
+        setLoginToast(first ? `Welcome back, ${first}! You're logged in.` : "You're logged in.");
       }}
     />
   );
