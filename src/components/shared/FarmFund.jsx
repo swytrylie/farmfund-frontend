@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TrendingUp, CreditCard, Lightbulb } from "lucide-react";
 import AuthPanel from "./AuthPanel";
-import DevNavBar from "./DevNavBar";
 import { apiRequest } from "../../api";
 import {
   LOCK_POLL_MS,
@@ -163,20 +162,6 @@ export default function FarmFund({ onLoginSuccess }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, lockEmail]);
 
-  // Dev nav: "Locked" shows the real lock when there is one; otherwise a
-  // preview timer that is not saved (so it never sticks after a refresh).
-  function handleDevNavigate(key) {
-    if (key === "locked") {
-      if (lock) {
-        setView("locked");
-      } else {
-        showLock({ email: "", endsAt: Date.now() + 15 * 60 * 1000, minutes: 15, requestSent: false, preview: true });
-      }
-    } else {
-      setView(key);
-    }
-  }
-
   return (
     <section
       className="relative w-full min-h-screen flex items-center bg-cover bg-center overflow-hidden"
@@ -269,9 +254,6 @@ export default function FarmFund({ onLoginSuccess }) {
           loginNotice={loginNotice}
         />
       )}
-
-      {/* Dev-only floating nav for quickly testing every view state */}
-      <DevNavBar currentView={view} onNavigate={handleDevNavigate} />
     </section>
   );
 }
